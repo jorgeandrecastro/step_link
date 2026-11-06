@@ -4,6 +4,7 @@
 [![docs.rs](https://docs.rs/step_link/badge.svg)](https://docs.rs/step_link)
 [![Downloads](https://img.shields.io/crates/d/step_link.svg)](https://crates.io/crates/step_link)
 [![License](https://img.shields.io/crates/l/step_link.svg)](#licence)
+[![CI](https://github.com/jorgeandrecastro/step_link/actions/workflows/ci.yml/badge.svg)](https://github.com/jorgeandrecastro/step_link/actions)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 Moteur géométrique **B-Rep** et parser **STEP (ISO 10303-21)** en pur Rust, pensé pour être utilisé notamment avec [Bevy](https://bevyengine.org).
