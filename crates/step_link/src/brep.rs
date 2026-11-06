@@ -13,11 +13,11 @@ pub type VertexId = usize;
 /// Index d'une arête dans [`Solid::edges`].
 pub type EdgeId = usize;
 
-fn dot(a: Point3, b: Point3) -> f64 {
+pub(crate) fn dot(a: Point3, b: Point3) -> f64  {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn cross(a: Point3, b: Point3) -> Point3 {
+pub(crate) fn cross(a: Point3, b: Point3) -> Point3 {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -25,7 +25,11 @@ fn cross(a: Point3, b: Point3) -> Point3 {
     ]
 }
 
-fn normalize(v: Point3) -> Point3 {
+pub(crate) fn sub(a: Point3, b: Point3) -> Point3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+pub(crate) fn normalize(v: Point3) -> Point3 {
     let norm = dot(v, v).sqrt();
     if norm == 0.0 {
         v
@@ -201,6 +205,9 @@ pub struct Edge {
     pub end: VertexId,
     /// Courbe portée par l'arête.
     pub curve: Curve,
+    /// `true` si la courbe est parcourue dans le même sens que l'arête (de `start` vers `end`).
+    pub same_sense: bool,
+
 }
 
 /// Utilisation d'une arête dans une boucle, avec son sens de parcours.
@@ -339,10 +346,11 @@ fn oriented_edge(edges: &mut Vec<Edge>, a: VertexId, b: VertexId) -> OrientedEdg
             forward: false,
         };
     }
-    edges.push(Edge {
+        edges.push(Edge {
         start: a,
         end: b,
         curve: Curve::Line,
+        same_sense: true,
     });
     OrientedEdge {
         edge: edges.len() - 1,

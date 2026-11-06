@@ -260,7 +260,13 @@ impl<'a> Builder<'a> {
         let start = self.vertex(args.reference(1)?)?;
         let end = self.vertex(args.reference(2)?)?;
         let curve = self.curve(args.reference(3)?)?;
-        self.edges.push(Edge { start, end, curve });
+        let same_sense = args.flag(4)?;
+        self.edges.push(Edge {
+            start,
+            end,
+            curve,
+            same_sense,
+        });
         let edge = self.edges.len() - 1;
         self.edge_ids.insert(id, edge);
         Ok(edge)

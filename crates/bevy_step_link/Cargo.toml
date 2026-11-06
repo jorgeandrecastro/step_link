@@ -3,12 +3,12 @@ name = "bevy_step_link"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Intégration Bevy de step_link : AssetLoader pour importer des fichiers STEP (.step/.stp) en Mesh."
+description = "Bevy integration for step_link: AssetLoader importing STEP (.step/.stp) CAD files as Mesh."
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/bevy_step_link"
-readme = "../../README.md"
+readme.workspace = true
 keywords = ["bevy", "step", "cad", "asset", "mesh"]
 categories = ["game-development", "graphics", "rendering::data-formats"]
 
@@ -18,7 +18,3 @@ bevy = { workspace = true, features = ["bevy_asset", "bevy_render"] }
 
 [dev-dependencies]
 bevy = "0.20"
-
-[[example]]
-name = "load_step"
-path = "../../examples/load_step.rs"

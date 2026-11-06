@@ -3,16 +3,13 @@ name = "step_link"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Moteur géométrique B-Rep, parser STEP (ISO 10303-21) et tessellation en pur Rust, sans dépendance à Bevy."
+description = "Pure Rust B-Rep geometry kernel, STEP (ISO 10303-21) parser and tessellation, no Bevy dependency."
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/step_link"
-readme = "../../README.md"
+readme.workspace = true
 keywords = ["step", "brep", "cad", "mesh", "tessellation"]
 categories = ["parser-implementations", "graphics", "mathematics"]
 
 [dependencies]
-
-[features]
-default = []

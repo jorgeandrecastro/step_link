@@ -14,3 +14,4 @@ readme = "README.md"
 [workspace.dependencies]
 step_link = { path = "crates/step_link", version = "0.1.0" }
 bevy = { version = "0.20", default-features = false }
+
