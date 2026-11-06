@@ -1,6 +1,6 @@
 //! Tessellation : conversion d'un [`Solid`] B-Rep en maillage triangulaire.
 
-use crate::brep::{Face, Solid};
+use crate::brep::{Face, Solid, Surface};
 
 /// Maillage triangulaire indépendant de tout moteur de rendu.
 ///
@@ -26,28 +26,33 @@ impl MeshData {
 /// Tessellise un solide complet.
 pub fn tessellate(solid: &Solid) -> MeshData {
     let mut mesh = MeshData::default();
-    for face in solid.shells.iter().flat_map(|s| s.faces.iter()) {
-        tessellate_face(face, &mut mesh);
+    for face in solid.faces() {
+        tessellate_face(solid, face, &mut mesh);
     }
     mesh
 }
 
-/// Tessellise une face plane par triangulation en éventail.
+
+/// Tessellise une face plane par triangulation en éventail de sa boucle externe.
 ///
-/// Correct pour les polygones convexes ; les contours concaves et les surfaces
-/// courbes nécessiteront un algorithme dédié (ex. *ear clipping*).
-fn tessellate_face(face: &Face, mesh: &mut MeshData) {
-    let verts: Vec<_> = face.vertices().collect();
-    if verts.len() < 3 {
+/// Les faces non planes et les boucles internes sont ignorées pour l'instant
+/// (étape 4 de la feuille de route).
+fn tessellate_face(solid: &Solid, face: &Face, mesh: &mut MeshData) {
+    let Surface::Plane { frame } = &face.surface else {
+        return;
+    };
+    let points = solid.loop_points(&face.outer_loop);
+    if points.len() < 3 {
         return;
     }
+    let sign = if face.same_sense { 1.0 } else { -1.0 };
+    let normal = frame.z.map(|c| (c * sign) as f32);
     let base = mesh.positions.len() as u32;
-    let normal = face.normal.map(|c| c as f32);
-    for v in &verts {
-        mesh.positions.push(v.position.map(|c| c as f32));
+    for p in &points {
+        mesh.positions.push(p.map(|c| c as f32));
         mesh.normals.push(normal);
     }
-    for i in 1..(verts.len() as u32 - 1) {
+    for i in 1..(points.len() as u32 - 1) {
         mesh.indices.extend_from_slice(&[base, base + i, base + i + 1]);
     }
 }

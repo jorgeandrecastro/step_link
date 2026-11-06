@@ -25,3 +25,4 @@
 pub mod brep;
 pub mod mesh;
 pub mod parser;
+mod builder;

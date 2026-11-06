@@ -32,8 +32,10 @@ fn setup(
         },
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(-3.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+        commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+            .with_scale(Vec3::splat(0.05)),
     ));
 }

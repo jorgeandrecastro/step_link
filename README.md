@@ -17,13 +17,13 @@ Le projet est découpé en deux crates :
 
 ## État d'avancement
 
-- [x] Structures B-Rep minimales (`Solid`, `Shell`, `Face`, `Edge`, `Vertex`)
+- [x] Modèle B-Rep : `Solid` → `Shell` → `Face` (`Surface`, boucle externe et boucles internes) → `OrientedEdge` → `Edge` (`Curve`) → `Vertex`, arêtes partagées par index
 - [x] Tessellation de faces planes convexes (éventail)
 - [x] `AssetLoader` Bevy + plugin
 - [x] Parser Part 21 : en-tête, entités, paramètres typés, entités complexes, commentaires
-- [ ] Reconstruction de la topologie à partir des entités (pour l'instant aucun solide n'est produit)
+- [x] Reconstruction de la topologie à partir des entités STEP (plans, cylindres, cônes, sphères, tores ; droites, cercles, ellipses, B-splines)
 
-> Tant que la reconstruction n'est pas faite, le loader affiche un pavé de remplacement quel que soit le fichier STEP.
+> Seules les faces planes sont tessellées pour l'instant : cylindres, cônes et faces avec trous apparaissent incomplets (étape 4).
 
 ## Roadmap
 
@@ -34,16 +34,17 @@ Lexer et graphe `#id → entité` (`parse_part21`). Paramètres : références, 
 - [ ] Test sur de vrais exports (Fusion 360, FreeCAD, SolidWorks)
 - [ ] Fuzzing du lexer (`cargo fuzz`), aucune panique sur fichier malformé
 
-### 2. Modèle B-Rep complet
-- [ ] `Face { surface, loops, same_sense }` avec boucle externe et boucles internes (trous)
-- [ ] `Surface` : plan, cylindre, cône, sphère, tore, B-spline/NURBS
-- [ ] Arêtes portant leur courbe (droite, cercle, B-spline) et partagées entre faces par index
+### 2. Modèle B-Rep complet ✅
+`Face { surface, outer_loop, inner_loops, same_sense }`, `Surface` (plan, cylindre, cône, sphère, tore, B-spline), `Curve` (droite, cercle, ellipse, B-spline), arêtes partagées par index.
 
-### 3. Entités STEP vers topologie
-- [ ] Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND → EDGE_LOOP → ORIENTED_EDGE → EDGE_CURVE → VERTEX_POINT → CARTESIAN_POINT`
-- [ ] Surfaces et repères : `PLANE`, `CYLINDRICAL_SURFACE`, `AXIS2_PLACEMENT_3D`
+### 3. Entités STEP vers topologie ✅
+Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND → EDGE_LOOP → ORIENTED_EDGE → EDGE_CURVE → VERTEX_POINT → CARTESIAN_POINT`, surfaces (plan, cylindre, cône, sphère, tore) et courbes (droite, cercle, ellipse, B-spline). Validé sur un export réel de 63 faces.
+
 - [ ] `BREP_WITH_VOIDS`
-- [ ] Premier jalon : un cube exporté de Fusion 360 devient un `Solid` correct
+- [ ] Surfaces B-spline, B-splines rationnelles, `SURFACE_CURVE`
+- [ ] Sens des courbes (`same_sense` d'`EDGE_CURVE`)
+- [ ] Contour externe : sans `FACE_OUTER_BOUND`, le premier contour est supposé externe
+- [ ] Unités du fichier (mm)
 
 ### 4. Tessellation
 - [ ] Plans : *ear clipping* avec trous (à la place de l'éventail)
@@ -61,7 +62,8 @@ Lexer et graphe `#id → entité` (`parse_part21`). Paramètres : références, 
 
 ### 6. Robustesse et publication
 - [ ] Corpus de pièces de complexité croissante : cube, cylindre percé, pièce avec congés
-
+- [ ] Documentation et exemples complets
+- [ ] Publication sur crates.io
 
 ## Installation
 

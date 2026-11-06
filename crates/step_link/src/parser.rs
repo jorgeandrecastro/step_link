@@ -1,14 +1,14 @@
 //! Parser STEP (ISO 10303-21, « Part 21 »).
 //!
-//! Étape 1 de la feuille de route : lexer et graphe d'entités. Le fichier est
-//! lu en un [`StepFile`] (en-tête + entités indexées par `#id`) avec des
-//! paramètres typés ([`Param`]). La construction de la topologie B-Rep à partir
-//! de ce graphe reste à implémenter.
+//! Lexer et graphe d'entités : le fichier est lu en un [`StepFile`] (en-tête +
+//! entités indexées par `#id`) avec des paramètres typés ([`Param`]).
+//! [`parse_step`] reconstruit ensuite les solides B-Rep à partir de ce graphe.
 //!
 //! Limites connues : les séquences d'échappement des chaînes (`\X\`, `\X2\`, …)
 //! ne sont pas décodées, et seules les sections `HEADER` et `DATA` sont lues.
 
 use crate::brep::Solid;
+use crate::builder::build_solids;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -31,6 +31,13 @@ pub enum ParseError {
         /// Description de l'erreur.
         message: String,
     },
+    /// Entité STEP invalide ou non prise en charge.
+    Invalid {
+        /// Identifiant de l'entité en cause.
+        entity: EntityId,
+        /// Description du problème.
+        message: String,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -40,6 +47,7 @@ impl fmt::Display for ParseError {
             Self::MissingDataSection => write!(f, "section `DATA;` manquante"),
             Self::MissingFooter => write!(f, "pied `END-ISO-10303-21;` manquant"),
             Self::Syntax { line, message } => write!(f, "ligne {line} : {message}"),
+            Self::Invalid { entity, message } => write!(f, "entité #{entity} : {message}"),
         }
     }
 }
@@ -158,7 +166,7 @@ impl StepFile {
 /// Résultat de l'analyse d'un fichier STEP.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StepModel {
-    /// Solides reconstruits (vide tant que l'étape 3 n'est pas implémentée).
+    /// Solides reconstruits, un par `MANIFOLD_SOLID_BREP`.
     pub solids: Vec<Solid>,
     /// Nombre d'entités de la section `DATA`.
     pub entity_count: usize,
@@ -171,8 +179,9 @@ pub struct StepModel {
 /// Retourne une [`ParseError`] si le fichier est invalide.
 pub fn parse_step(input: &str) -> Result<StepModel, ParseError> {
     let file = parse_part21(input)?;
+    let solids = build_solids(&file)?;
     Ok(StepModel {
-        solids: Vec::new(),
+        solids,
         entity_count: file.entities.len(),
     })
 }
