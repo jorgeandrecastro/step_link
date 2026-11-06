@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["crates/step_link", "crates/bevy_step_link"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["Jorge Andre Castro <georgeandrec@gmail.com>"]
+repository = "https://github.com/jorgeandrecastro/step_link"
+readme = "README.md"
+
+[workspace.dependencies]
+step_link = { path = "crates/step_link", version = "0.1.0" }
+bevy = { version = "0.20", default-features = false }
