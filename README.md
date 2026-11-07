@@ -13,6 +13,10 @@ Moteur géométrique **B-Rep** et parser **STEP (ISO 10303-21)** en pur Rust, pe
 
 *Pièce `WallHook_30mm.stp` (63 faces, 744 triangles) chargée directement depuis le fichier STEP, sans conversion, avec le parser et le tessellateur de `step_link`.*
 
+![3DBenchy chargé depuis un fichier STEP et rendu dans Bevy](https://raw.githubusercontent.com/jorgeandrecastro/step_link/main/images/image2.png)
+
+*Modèle `3DBenchy.step` rendu dans Bevy.*
+
 ## Vision
 
 Importer des pièces CAO (`.step` / `.stp`) directement dans un moteur de jeu ou un viewer, sans passer par une conversion externe en STL/OBJ, et en conservant la topologie B-Rep (solides, coques, faces, arêtes, sommets) pour des usages futurs : mesure, sélection de faces, retessellation à la volée.
