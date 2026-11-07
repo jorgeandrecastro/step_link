@@ -2,12 +2,12 @@
 //!
 //! Les arêtes sont discrétisées une fois et partagées entre faces voisines.
 //! Chaque face est ensuite projetée dans l'espace de sa surface et triangulée par
-//! *ear clipping*. Plans, cylindres et cônes sont pris en charge ; les autres
-//! surfaces sont ignorées pour l'instant.
+//! *ear clipping*. Plans, cylindres, cônes, tores et surfaces B-spline sont pris en
+//! charge ; les sphères sont ignorées pour l'instant.
 
 use crate::brep::{
-    BSplineCurve, Curve, Edge, EdgeId, Face, Frame, Loop, Point3, Solid, Surface, dot, normalize,
-    sub,
+    BSplineCurve, BSplineSurface, Curve, Edge, EdgeId, Face, Frame, Loop, Point3, Solid, Surface,
+    cross, dot, normalize, sub,
 };
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, TAU};
@@ -52,6 +52,15 @@ pub fn tessellate_with_tolerance(solid: &Solid, tolerance: f64) -> MeshData {
 }
 
 type EdgeCache = HashMap<EdgeId, Vec<Point3>>;
+
+fn dist(a: Point3, b: Point3) -> f64 {
+    let d = sub(a, b);
+    dot(d, d).sqrt()
+}
+
+fn scaled(v: Point3, k: f64) -> Point3 {
+    [v[0] * k, v[1] * k, v[2] * k]
+}
 
 // ---------------------------------------------------------------------------
 // Discrétisation des arêtes
@@ -236,6 +245,190 @@ fn loop_polyline(
 }
 
 // ---------------------------------------------------------------------------
+// Surface B-spline : évaluation et projection d'un point
+// ---------------------------------------------------------------------------
+
+struct SplineChart {
+    degree_u: usize,
+    degree_v: usize,
+    knots_u: Vec<f64>,
+    knots_v: Vec<f64>,
+    /// Points de contrôle (déjà multipliés par leur poids si la surface est rationnelle).
+    control: Vec<Vec<Point3>>,
+    /// Poids sous la forme `[w, 0, 0]`, pour réutiliser l'évaluation des points.
+    weights: Option<Vec<Vec<Point3>>>,
+    /// `[[u_min, u_max], [v_min, v_max]]`.
+    domain: [[f64; 2]; 2],
+    /// Échantillons `((u, v), point)` pour la recherche grossière du point le plus proche.
+    grid: Vec<([f64; 2], Point3)>,
+    /// Longueur 3D approximative par unité de paramètre, pour des coordonnées 2D proches du métrique.
+    scale: [f64; 2],
+}
+
+impl SplineChart {
+    fn new(s: &BSplineSurface) -> Option<Self> {
+        let nu = s.control_points.len();
+        let nv = s.control_points.first()?.len();
+        if nu <= s.degree_u || nv <= s.degree_v || s.control_points.iter().any(|r| r.len() != nv) {
+            return None;
+        }
+        if s.knots_u.len() != nu + s.degree_u + 1 || s.knots_v.len() != nv + s.degree_v + 1 {
+            return None;
+        }
+
+        let rational = s
+            .weights
+            .as_ref()
+            .filter(|w| w.len() == nu && w.iter().all(|r| r.len() == nv));
+        let control: Vec<Vec<Point3>> = match rational {
+            Some(w) => s
+                .control_points
+                .iter()
+                .zip(w)
+                .map(|(row, weights)| {
+                    row.iter()
+                        .zip(weights)
+                        .map(|(p, &w)| [p[0] * w, p[1] * w, p[2] * w])
+                        .collect()
+                })
+                .collect(),
+            None => s.control_points.clone(),
+        };
+        let weights = rational.map(|w| {
+            w.iter()
+                .map(|row| row.iter().map(|&w| [w, 0.0, 0.0]).collect())
+                .collect()
+        });
+
+        let domain = [
+            [s.knots_u[s.degree_u], s.knots_u[nu]],
+            [s.knots_v[s.degree_v], s.knots_v[nv]],
+        ];
+        if domain[0][1] <= domain[0][0] || domain[1][1] <= domain[1][0] {
+            return None;
+        }
+
+        let mut chart = Self {
+            degree_u: s.degree_u,
+            degree_v: s.degree_v,
+            knots_u: s.knots_u.clone(),
+            knots_v: s.knots_v.clone(),
+            control,
+            weights,
+            domain,
+            grid: Vec::new(),
+            scale: [1.0, 1.0],
+        };
+
+        let gu = (nu * 3).clamp(8, 40);
+        let gv = (nv * 3).clamp(8, 40);
+        let [[u0, u1], [v0, v1]] = domain;
+        for i in 0..=gu {
+            for j in 0..=gv {
+                let u = u0 + (u1 - u0) * i as f64 / gu as f64;
+                let v = v0 + (v1 - v0) * j as f64 / gv as f64;
+                let point = chart.eval(u, v);
+                chart.grid.push(([u, v], point));
+            }
+        }
+
+        let stride = gv + 1;
+        let row_length: f64 = (0..gu)
+            .map(|i| {
+                dist(
+                    chart.grid[i * stride + gv / 2].1,
+                    chart.grid[(i + 1) * stride + gv / 2].1,
+                )
+            })
+            .sum();
+        let column_length: f64 = (0..gv)
+            .map(|j| {
+                dist(
+                    chart.grid[(gu / 2) * stride + j].1,
+                    chart.grid[(gu / 2) * stride + j + 1].1,
+                )
+            })
+            .sum();
+        let nonzero = |x: f64| if x > 1e-12 { x } else { 1.0 };
+        chart.scale = [
+            nonzero(row_length / (u1 - u0)),
+            nonzero(column_length / (v1 - v0)),
+        ];
+        Some(chart)
+    }
+
+    fn blend(&self, grid: &[Vec<Point3>], u: f64, v: f64) -> Point3 {
+        let rows: Vec<Point3> = grid
+            .iter()
+            .map(|row| de_boor(self.degree_v, &self.knots_v, row, v))
+            .collect();
+        de_boor(self.degree_u, &self.knots_u, &rows, u)
+    }
+
+    fn eval(&self, u: f64, v: f64) -> Point3 {
+        let p = self.blend(&self.control, u, v);
+        match &self.weights {
+            Some(weights) => {
+                let w = self.blend(weights, u, v)[0];
+                if w.abs() > 1e-12 {
+                    scaled(p, 1.0 / w)
+                } else {
+                    p
+                }
+            }
+            None => p,
+        }
+    }
+
+    /// Dérivées partielles par différences finies centrées (décentrées au bord du domaine).
+    fn partials(&self, u: f64, v: f64) -> (Point3, Point3) {
+        let [[u0, u1], [v0, v1]] = self.domain;
+        let (hu, hv) = ((u1 - u0) * 1e-4, (v1 - v0) * 1e-4);
+        let (ua, ub) = ((u - hu).max(u0), (u + hu).min(u1));
+        let (va, vb) = ((v - hv).max(v0), (v + hv).min(v1));
+        let su = scaled(sub(self.eval(ub, v), self.eval(ua, v)), 1.0 / (ub - ua));
+        let sv = scaled(sub(self.eval(u, vb), self.eval(u, va)), 1.0 / (vb - va));
+        (su, sv)
+    }
+
+    /// Paramètres `(u, v)` du point de la surface le plus proche de `p`.
+    fn invert(&self, p: Point3) -> [f64; 2] {
+        let [[u0, u1], [v0, v1]] = self.domain;
+        let mut best = self.grid[0];
+        for cell in &self.grid {
+            if dist(cell.1, p) < dist(best.1, p) {
+                best = *cell;
+            }
+        }
+        let [mut u, mut v] = best.0;
+        for _ in 0..12 {
+            let residual = sub(p, self.eval(u, v));
+            let (su, sv) = self.partials(u, v);
+            let (a, b, c) = (dot(su, su), dot(su, sv), dot(sv, sv));
+            let det = a * c - b * b;
+            if det.abs() < 1e-18 {
+                break;
+            }
+            let (ru, rv) = (dot(su, residual), dot(sv, residual));
+            let du = (c * ru - b * rv) / det;
+            let dv = (a * rv - b * ru) / det;
+            u = (u + du).clamp(u0, u1);
+            v = (v + dv).clamp(v0, v1);
+            if du.abs() < 1e-12 * (u1 - u0) && dv.abs() < 1e-12 * (v1 - v0) {
+                break;
+            }
+        }
+        [u, v]
+    }
+
+    fn normal(&self, p: Point3) -> Point3 {
+        let [u, v] = self.invert(p);
+        let (su, sv) = self.partials(u, v);
+        normalize(cross(su, sv))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Projection d'une face dans l'espace de sa surface
 // ---------------------------------------------------------------------------
 
@@ -243,6 +436,15 @@ enum Chart {
     Plane(Frame),
     Cylinder(Frame),
     Cone(Frame, f64),
+    /// Repère, rayon majeur, rayon mineur.
+    Torus(Frame, f64, f64),
+    BSpline(Box<SplineChart>),
+}
+
+fn radial_direction(frame: &Frame, p: Point3) -> Point3 {
+    let d = sub(p, frame.origin);
+    let h = dot(d, frame.z);
+    normalize(std::array::from_fn(|k| d[k] - h * frame.z[k]))
 }
 
 impl Chart {
@@ -253,44 +455,72 @@ impl Chart {
             Surface::Cone {
                 frame, semi_angle, ..
             } => Some(Self::Cone(*frame, *semi_angle)),
-            _ => None,
+            Surface::Torus {
+                frame,
+                major_radius,
+                minor_radius,
+            } => Some(Self::Torus(*frame, *major_radius, *minor_radius)),
+            Surface::BSpline(s) => SplineChart::new(s).map(|c| Self::BSpline(Box::new(c))),
+            Surface::Sphere { .. } => None,
         }
     }
 
-    fn frame(&self) -> &Frame {
+    /// Axes `(u, v)` périodiques (angles) dont les coordonnées doivent être rendues continues.
+    fn periodic(&self) -> [bool; 2] {
         match self {
-            Self::Plane(f) | Self::Cylinder(f) | Self::Cone(f, _) => f,
+            Self::Plane(_) | Self::BSpline(_) => [false, false],
+            Self::Cylinder(_) | Self::Cone(..) => [true, false],
+            Self::Torus(..) => [true, true],
         }
     }
 
-    fn is_periodic(&self) -> bool {
-        !matches!(self, Self::Plane(_))
-    }
-
-    /// `(x, y)` pour un plan, `(angle, hauteur)` sinon.
+    /// Coordonnées dans l'espace de la surface (angles pour les axes périodiques).
     fn uv(&self, p: Point3) -> [f64; 2] {
-        let f = self.frame();
-        let d = sub(p, f.origin);
-        let y = f.y();
         match self {
-            Self::Plane(_) => [dot(d, f.x), dot(d, y)],
-            _ => [dot(d, y).atan2(dot(d, f.x)), dot(d, f.z)],
+            Self::Plane(f) => {
+                let d = sub(p, f.origin);
+                [dot(d, f.x), dot(d, f.y())]
+            }
+            Self::Cylinder(f) | Self::Cone(f, _) => {
+                let d = sub(p, f.origin);
+                [dot(d, f.y()).atan2(dot(d, f.x)), dot(d, f.z)]
+            }
+            Self::Torus(f, major, _) => {
+                let d = sub(p, f.origin);
+                let h = dot(d, f.z);
+                let r = (dot(d, d) - h * h).max(0.0).sqrt();
+                [dot(d, f.y()).atan2(dot(d, f.x)), h.atan2(r - *major)]
+            }
+            Self::BSpline(s) => s.invert(p),
         }
     }
 
     /// Normale de la surface en `p` (avant prise en compte de `same_sense`).
     fn normal(&self, p: Point3) -> Point3 {
-        let f = self.frame();
-        let d = sub(p, f.origin);
-        let h = dot(d, f.z);
-        let radial = normalize(std::array::from_fn(|k| d[k] - h * f.z[k]));
         match self {
-            Self::Plane(_) => f.z,
-            Self::Cylinder(_) => radial,
-            Self::Cone(_, angle) => {
+            Self::Plane(f) => f.z,
+            Self::Cylinder(f) => radial_direction(f, p),
+            Self::Cone(f, angle) => {
+                let radial = radial_direction(f, p);
                 let (s, c) = angle.sin_cos();
                 std::array::from_fn(|k| c * radial[k] - s * f.z[k])
             }
+            Self::Torus(f, major, _) => {
+                let d = sub(p, f.origin);
+                let radial = radial_direction(f, p);
+                normalize(std::array::from_fn(|k| d[k] - *major * radial[k]))
+            }
+            Self::BSpline(s) => s.normal(p),
+        }
+    }
+
+    /// Facteurs appliqués à `(u, v)` pour obtenir des coordonnées 2D proches du métrique.
+    fn scale(&self, loops: &[Vec<Point3>]) -> [f64; 2] {
+        match self {
+            Self::Plane(_) => [1.0, 1.0],
+            Self::Cylinder(f) | Self::Cone(f, _) => [mean_radius(f, loops), 1.0],
+            Self::Torus(_, major, minor) => [major.max(1e-9), minor.max(1e-9)],
+            Self::BSpline(s) => s.scale,
         }
     }
 }
@@ -308,11 +538,11 @@ fn mean_radius(frame: &Frame, loops: &[Vec<Point3>]) -> f64 {
     }
 }
 
-/// Rend les angles continus le long d'une boucle.
-fn unwrap_angles(uv: &mut [[f64; 2]]) {
+/// Rend les angles continus le long d'une boucle, pour l'axe `axis`.
+fn unwrap_axis(uv: &mut [[f64; 2]], axis: usize) {
     for i in 1..uv.len() {
-        let previous = uv[i - 1][0];
-        uv[i][0] += TAU * ((previous - uv[i][0]) / TAU).round();
+        let previous = uv[i - 1][axis];
+        uv[i][axis] += TAU * ((previous - uv[i][axis]) / TAU).round();
     }
 }
 
@@ -335,13 +565,15 @@ fn tessellate_face(
         return;
     }
 
-    let periodic = chart.is_periodic();
+    let periodic = chart.periodic();
     let mut loops2d: Vec<Vec<[f64; 2]>> = loops3d
         .iter()
         .map(|points| {
             let mut uv: Vec<[f64; 2]> = points.iter().map(|&p| chart.uv(p)).collect();
-            if periodic {
-                unwrap_angles(&mut uv);
+            for axis in 0..2 {
+                if periodic[axis] {
+                    unwrap_axis(&mut uv, axis);
+                }
             }
             uv
         })
@@ -354,19 +586,25 @@ fn tessellate_face(
     loops2d.swap(0, outer_index);
     loops3d.swap(0, outer_index);
 
-    if periodic {
-        let mean = |l: &[[f64; 2]]| l.iter().map(|p| p[0]).sum::<f64>() / l.len() as f64;
+    // Les trous sont décalés d'un nombre entier de tours pour rester près du contour externe.
+    for axis in 0..2 {
+        if !periodic[axis] {
+            continue;
+        }
+        let mean = |l: &[[f64; 2]]| l.iter().map(|p| p[axis]).sum::<f64>() / l.len() as f64;
         let reference = mean(&loops2d[0]);
         for hole in loops2d.iter_mut().skip(1) {
             let shift = TAU * ((reference - mean(hole)) / TAU).round();
             for p in hole.iter_mut() {
-                p[0] += shift;
+                p[axis] += shift;
             }
         }
-        let scale = mean_radius(chart.frame(), &loops3d);
-        for p in loops2d.iter_mut().flatten() {
-            p[0] *= scale;
-        }
+    }
+
+    let scale = chart.scale(&loops3d);
+    for p in loops2d.iter_mut().flatten() {
+        p[0] *= scale[0];
+        p[1] *= scale[1];
     }
 
     let triangles = triangulate(&loops2d[0], &loops2d[1..]);
@@ -571,10 +809,42 @@ mod tests {
         let points = sample_conic(&frame, 10.0, 10.0, start, start, 0.05);
         assert!(points.len() > 16);
         let (first, last) = (points[0], points[points.len() - 1]);
-        let gap = sub(first, last);
-        assert!(dot(gap, gap).sqrt() < 1e-9);
+        assert!(dist(first, last) < 1e-9);
         for p in &points {
             assert!((dot(*p, *p).sqrt() - 10.0).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn inverts_bspline_surface_point() {
+        // Surface plane S(u, v) = (4u, 2v, 0).
+        let surface = BSplineSurface {
+            degree_u: 1,
+            degree_v: 1,
+            control_points: vec![
+                vec![[0.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+                vec![[4.0, 0.0, 0.0], [4.0, 2.0, 0.0]],
+            ],
+            weights: None,
+            knots_u: vec![0.0, 0.0, 1.0, 1.0],
+            knots_v: vec![0.0, 0.0, 1.0, 1.0],
+        };
+        let chart = SplineChart::new(&surface).unwrap();
+        let [u, v] = chart.invert([1.0, 1.5, 0.0]);
+        assert!((u - 0.25).abs() < 1e-6);
+        assert!((v - 0.75).abs() < 1e-6);
+        let normal = chart.normal([1.0, 1.5, 0.0]);
+        assert!(dist(normal, [0.0, 0.0, 1.0]) < 1e-6);
+    }
+
+    #[test]
+    fn torus_normal_points_outward() {
+        let frame = Frame::from_normal([0.0; 3], [0.0, 0.0, 1.0]);
+        let chart = Chart::Torus(frame, 10.0, 2.0);
+        let outer_equator: Point3 = std::array::from_fn(|k| frame.x[k] * 12.0);
+        assert!(dist(chart.normal(outer_equator), frame.x) < 1e-9);
+        let [u, v] = chart.uv(outer_equator);
+        assert!(u.is_finite());
+        assert!(v.abs() < 1e-9);
     }
 }

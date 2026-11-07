@@ -55,7 +55,8 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 
 - [ ] `BREP_WITH_VOIDS`
 - [x] Courbes B-splines rationnelles (entités complexes)
-- [ ] Surfaces B-spline et NURBS (lecture), `SURFACE_CURVE`
+- [x] Surfaces B-spline et NURBS (lecture, rationnelles comprises)
+- [ ] `SURFACE_CURVE`
 - [x] Les faces à surface non prise en charge sont ignorées avec un avertissement, au lieu de faire échouer le fichier
 - [ ] Contour externe : sans `FACE_OUTER_BOUND`, le premier contour est supposé externe
 - [ ] Unités non SI (pouces, `CONVERSION_BASED_UNIT`)
@@ -65,8 +66,10 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 - [x] Cylindres et cônes : triangulation dans l'espace paramétrique (angle, hauteur)
 - [x] Discrétisation des arêtes partagée entre faces voisines
 - [x] Tolérance (flèche maximale) configurable (`tessellate_with_tolerance`)
-- [ ] Sphères et tores
-- [ ] Surfaces B-spline/NURBS : projection des contours en (u, v) et points intérieurs
+- [x] Tores
+- [ ] Sphères
+- [x] Surfaces B-spline/NURBS : projection des contours en (u, v), triangulation du contour seul
+- [ ] Surfaces B-spline/NURBS et tores : points intérieurs (sans eux, les patchs courbes sont facettés)
 - [ ] Subdivision intérieure des faces courbes (seuls les points du bord sont utilisés)
 - [ ] Soudure des sommets entre faces
 - [ ] Vérifier le fond des trous coniques (artefact visible sur `WallHook_30mm`)

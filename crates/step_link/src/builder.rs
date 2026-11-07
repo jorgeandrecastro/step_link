@@ -1,8 +1,8 @@
 //! Conversion du graphe d'entités STEP en [`Solid`] B-Rep.
 
 use crate::brep::{
-    BSplineCurve, Curve, Edge, EdgeId, Face, Frame, Loop, OrientedEdge, Point3, Shell, Solid,
-    Surface, Vertex, VertexId,
+    BSplineCurve, BSplineSurface, Curve, Edge, EdgeId, Face, Frame, Loop, OrientedEdge, Point3,
+    Shell, Solid, Surface, Vertex, VertexId,
 };
 use crate::parser::{Entity, EntityId, Param, ParseError, Record, StepFile};
 use std::collections::HashMap;
@@ -86,6 +86,21 @@ fn vec3(args: &Args, index: usize) -> Result<Point3, ParseError> {
         [x, y, z] => Ok([*x, *y, *z]),
         _ => Err(args.invalid("3 coordonnées attendues")),
     }
+}
+
+/// Vecteur de nœuds développé (chaque nœud répété selon sa multiplicité).
+fn expand_knots(args: &Args, mults_at: usize, knots_at: usize) -> Result<Vec<f64>, ParseError> {
+    let multiplicities = args
+        .list(mults_at)?
+        .iter()
+        .map(|p| args.unsigned(p))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(args
+        .reals(knots_at)?
+        .into_iter()
+        .zip(multiplicities)
+        .flat_map(|(knot, count)| std::iter::repeat_n(knot, count))
+        .collect())
 }
 
 struct Builder<'a> {
@@ -218,13 +233,16 @@ impl<'a> Builder<'a> {
         }))
     }
 
-    /// Surface prise en charge, ou `None` si son type n'est pas géré (la face est alors ignorée).
+        /// Surface prise en charge, ou `None` si son type n'est pas géré (la face est alors ignorée).
     fn surface(&self, id: EntityId) -> Result<Option<Surface>, ParseError> {
         let file: &'a StepFile = self.file;
-        let name = file
+        let entity = file
             .get(id)
-            .ok_or_else(|| invalid(id, "entité introuvable"))?
-            .name();
+            .ok_or_else(|| invalid(id, "entité introuvable"))?;
+        if entity.record("B_SPLINE_SURFACE_WITH_KNOTS").is_some() {
+            return self.bspline_surface(id, entity).map(Some);
+        }
+        let name = entity.name();
         Ok(Some(match name {
             "PLANE" => {
                 let args = self.args(id, name)?;
@@ -266,6 +284,74 @@ impl<'a> Builder<'a> {
         }))
     }
 
+    /// Surface B-spline à nœuds, simple ou rationnelle (entité complexe).
+    fn bspline_surface(&self, id: EntityId, entity: &Entity) -> Result<Surface, ParseError> {
+        let (base, base_at, knots_args, knots_at) = if entity.is_complex() {
+            (
+                self.args(id, "B_SPLINE_SURFACE")?,
+                0,
+                self.args(id, "B_SPLINE_SURFACE_WITH_KNOTS")?,
+                0,
+            )
+        } else {
+            let args = self.args(id, "B_SPLINE_SURFACE_WITH_KNOTS")?;
+            (args, 1, args, 8)
+        };
+
+        let degree_u = base.unsigned(base.param(base_at)?)?;
+        let degree_v = base.unsigned(base.param(base_at + 1)?)?;
+        let control_points = base
+            .list(base_at + 2)?
+            .iter()
+            .map(|row| {
+                let Param::List(items) = row else {
+                    return Err(base.invalid("liste attendue"));
+                };
+                items
+                    .iter()
+                    .map(|p| {
+                        let point_id = p
+                            .as_id()
+                            .ok_or_else(|| base.invalid("référence attendue"))?;
+                        self.point(point_id)
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let knots_u = expand_knots(&knots_args, knots_at, knots_at + 2)?;
+        let knots_v = expand_knots(&knots_args, knots_at + 1, knots_at + 3)?;
+
+        let weights = if entity.record("RATIONAL_B_SPLINE_SURFACE").is_some() {
+            let rational = self.args(id, "RATIONAL_B_SPLINE_SURFACE")?;
+            let rows = rational
+                .list(0)?
+                .iter()
+                .map(|row| {
+                    let Param::List(items) = row else {
+                        return Err(rational.invalid("liste attendue"));
+                    };
+                    items
+                        .iter()
+                        .map(|p| p.as_f64().ok_or_else(|| rational.invalid("nombre attendu")))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(rows)
+        } else {
+            None
+        };
+
+        Ok(Surface::BSpline(BSplineSurface {
+            degree_u,
+            degree_v,
+            control_points,
+            weights,
+            knots_u,
+            knots_v,
+        }))
+    }
+    
     fn vertex(&mut self, id: EntityId) -> Result<VertexId, ParseError> {
         if let Some(&known) = self.vertex_ids.get(&id) {
             return Ok(known);
@@ -447,7 +533,7 @@ mod tests {
 
     #[test]
     fn skips_unsupported_surface() {
-        let body = TRIANGLE.replace("PLANE('',#19)", "B_SPLINE_SURFACE_WITH_KNOTS('',#19)");
+        let body = TRIANGLE.replace("PLANE('',#19)", "SURFACE_INCONNUE('',#19)");
         let model = parse_step(&file(&body)).unwrap();
         assert_eq!(model.solids[0].face_count(), 0);
         assert_eq!(model.skipped_faces, 1);
