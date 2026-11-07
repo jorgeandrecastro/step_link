@@ -56,7 +56,7 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 - [ ] `BREP_WITH_VOIDS`
 - [ ] Surfaces B-spline, B-splines rationnelles, `SURFACE_CURVE`
 - [ ] Contour externe : sans `FACE_OUTER_BOUND`, le premier contour est supposé externe
-- [ ] Unités du fichier (mm)
+- [ ] Unités non SI (pouces, `CONVERSION_BASED_UNIT`)
 
 ### 4. Tessellation (en cours)
 - [x] Plans : *ear clipping* avec trous
@@ -70,8 +70,8 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 - [ ] Vérifier le fond des trous coniques (artefact visible sur `WallHook_30mm`)
 
 ### 5. Intégration Bevy
-- [ ] Supprimer le pavé de remplacement du loader
-- [ ] Conversion d'unités et d'axes (mm / Z-up vers m / Y-up) : pour l'instant faite à la main dans l'exemple (rotation de -90° en X et échelle)
+- [x] Pavé de remplacement supprimé : un fichier sans solide est une erreur de chargement
+- [x] Conversion d'unités et d'axes (mm / Z-up vers m / Y-up) faite par le loader
 - [ ] Plusieurs solides et assemblages (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`, transformations)
 - [ ] Réglages du loader (tolérance, échelle) via `type Settings`
 - [ ] Couleurs (`STYLED_ITEM`)
@@ -119,12 +119,12 @@ fn setup(
     // Le .step est chargé directement comme un Mesh.
     let mesh: Handle<Mesh> = assets.load("models/part.step");
 
-    // STEP est en mm et Z-up ; Bevy est en unités libres et Y-up.
+    // Le loader convertit en mètres et en Y-up : une pièce de 40 mm fait 0.04 unité.
+    // On l'agrandit ici pour la voir avec la caméra ci-dessous.
     commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
-            .with_scale(Vec3::splat(0.05)),
+        Transform::from_scale(Vec3::splat(50.0)),
     ));
 
     // Sans caméra, Bevy n'affiche que le fond gris.

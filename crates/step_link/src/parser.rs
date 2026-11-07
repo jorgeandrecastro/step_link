@@ -164,12 +164,14 @@ impl StepFile {
 }
 
 /// Résultat de l'analyse d'un fichier STEP.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StepModel {
     /// Solides reconstruits, un par `MANIFOLD_SOLID_BREP`.
     pub solids: Vec<Solid>,
     /// Nombre d'entités de la section `DATA`.
     pub entity_count: usize,
+    /// Mètres par unité de longueur du fichier (`0.001` pour un fichier en millimètres, `1.0` si inconnu).
+    pub unit_scale: f64,
 }
 
 /// Analyse un fichier STEP et reconstruit ses solides.
@@ -183,7 +185,31 @@ pub fn parse_step(input: &str) -> Result<StepModel, ParseError> {
     Ok(StepModel {
         solids,
         entity_count: file.entities.len(),
+        unit_scale: length_unit_scale(&file),
     })
+}
+
+/// Échelle de l'unité de longueur SI déclarée dans le fichier ; `1.0` sinon (unités non SI non gérées).
+fn length_unit_scale(file: &StepFile) -> f64 {
+    file.entities
+        .values()
+        .find_map(|entity| {
+            entity.record("LENGTH_UNIT")?;
+            let si = entity.record("SI_UNIT")?;
+            let prefix = match si.params.first() {
+                Some(Param::Enum(p)) => p.as_str(),
+                _ => "",
+            };
+            Some(match prefix {
+                "MICRO" => 1e-6,
+                "MILLI" => 1e-3,
+                "CENTI" => 1e-2,
+                "DECI" => 1e-1,
+                "KILO" => 1e3,
+                _ => 1.0,
+            })
+        })
+        .unwrap_or(1.0)
 }
 
 /// Lit la structure Part 21 : en-tête et graphe d'entités, sans interpréter la géométrie.
@@ -583,6 +609,11 @@ END-ISO-10303-21;
     #[test]
     fn parse_step_counts_entities() {
         assert_eq!(parse_step(SAMPLE).unwrap().entity_count, 7);
+    }
+
+    #[test]
+    fn reads_length_unit_scale() {
+        assert_eq!(parse_step(SAMPLE).unwrap().unit_scale, 1e-3);
     }
 
     #[test]

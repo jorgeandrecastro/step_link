@@ -1,10 +1,11 @@
 //! [`AssetLoader`] Bevy pour les fichiers STEP.
+//!
+//! Le maillage est converti en mètres et en axes Bevy (Y vers le haut).
 
 use bevy::asset::{AssetLoader, LoadContext, RenderAssetUsages, io::Reader};
 use bevy::reflect::TypePath;
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use std::fmt;
-use step_link::brep::Solid;
 use step_link::mesh::{MeshData, tessellate};
 use step_link::parser::{ParseError, parse_step};
 
@@ -17,6 +18,8 @@ pub enum StepLoaderError {
     Utf8(std::string::FromUtf8Error),
     /// Le contenu STEP est invalide.
     Parse(ParseError),
+    /// Le fichier ne contient aucun solide.
+    NoSolid,
 }
 
 impl fmt::Display for StepLoaderError {
@@ -25,6 +28,7 @@ impl fmt::Display for StepLoaderError {
             Self::Io(e) => write!(f, "erreur d'E/S : {e}"),
             Self::Utf8(e) => write!(f, "fichier STEP non UTF-8 : {e}"),
             Self::Parse(e) => write!(f, "fichier STEP invalide : {e}"),
+            Self::NoSolid => write!(f, "aucun solide dans le fichier STEP"),
         }
     }
 }
@@ -68,18 +72,24 @@ impl AssetLoader for StepLoader {
         reader.read_to_end(&mut bytes).await?;
         let text = String::from_utf8(bytes)?;
 
-        let mut model = parse_step(&text)?;
-        // Repli temporaire tant que le parser ne construit pas de solides.
+        let model = parse_step(&text)?;
         if model.solids.is_empty() {
-            model.solids.push(Solid::cuboid(2.0, 1.0, 1.0));
+            return Err(StepLoaderError::NoSolid);
         }
 
+        // Unités du fichier vers mètres, puis Z vers le haut (STEP) vers Y vers le haut (Bevy).
+        let scale = model.unit_scale as f32;
         let mut data = MeshData::default();
         for solid in &model.solids {
             let part = tessellate(solid);
             let offset = data.positions.len() as u32;
-            data.positions.extend(part.positions);
-            data.normals.extend(part.normals);
+            data.positions.extend(
+                part.positions
+                    .iter()
+                    .map(|&[x, y, z]| [x * scale, z * scale, -y * scale]),
+            );
+            data.normals
+                .extend(part.normals.iter().map(|&[x, y, z]| [x, z, -y]));
             data.indices.extend(part.indices.iter().map(|i| i + offset));
         }
         Ok(to_bevy_mesh(data))

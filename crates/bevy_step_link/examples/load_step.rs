@@ -9,8 +9,8 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy_step_link::StepLinkPlugin;
 
-/// Échelle : 1 mm STEP -> 0.05 unité Bevy.
-const SCALE: f32 = 0.05;
+/// Agrandissement d'affichage : le loader livre des mètres (pièce d'environ 4 cm).
+const SCALE: f32 = 50.0;
 
 fn main() {
     App::new()
@@ -34,20 +34,18 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Le .step est chargé directement comme un Mesh.
+    // Le .step est chargé directement comme un Mesh, déjà en mètres et en Y-up.
     let mesh: Handle<Mesh> = asset_server.load("models/part.step");
 
-    // La pièce. STEP est Z-up et Bevy Y-up : rotation de -90° autour de X.
     commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
-            .with_scale(Vec3::splat(SCALE)),
+        Transform::from_scale(Vec3::splat(SCALE)),
     ));
 
-    // Centre de la pièce : boîte englobante STEP (-20,-20,0)..(20,30,35),
-    // soit (0, 5, 17.5) ; après rotation X de -90° : (0, 17.5, -5) * SCALE.
-    let focus = Vec3::new(0.0, 17.5, -5.0) * SCALE;
+    // Centre de la pièce : boîte englobante STEP (-20,-20,0)..(20,30,35) mm,
+    // soit (0, 5, 17.5) mm ; après le loader (mètres, Y-up) : (0, 17.5, -5) mm.
+    let focus = Vec3::new(0.0, 0.0175, -0.005) * SCALE;
 
     // Caméra orbitale.
     commands.spawn((
