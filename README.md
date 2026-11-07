@@ -9,10 +9,6 @@
 
 Moteur géométrique **B-Rep** et parser **STEP (ISO 10303-21)** en pur Rust, pensé pour être utilisé notamment avec [Bevy](https://bevyengine.org).
 
-![WallHook_30mm chargé depuis un fichier STEP et rendu dans Bevy](https://raw.githubusercontent.com/jorgeandrecastro/step_link/main/images/image1.png)
-
-*Pièce `WallHook_30mm.stp` (63 faces, 744 triangles) chargée directement depuis le fichier STEP, sans conversion, avec le parser et le tessellateur de `step_link`.*
-
 ![3DBenchy chargé depuis un fichier STEP et rendu dans Bevy](https://raw.githubusercontent.com/jorgeandrecastro/step_link/main/images/image2.png)
 
 *Modèle `3DBenchy.step` rendu dans Bevy.*
@@ -95,14 +91,14 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 ```toml
 [dependencies]
 bevy = "0.20"
-bevy_step_link = "0.1"
+bevy_step_link = "0.2"
 ```
 
 Pour utiliser uniquement le cœur, sans Bevy :
 
 ```toml
 [dependencies]
-step_link = "0.1"
+step_link = "0.2"
 ```
 
 ## Exemple (Bevy)
