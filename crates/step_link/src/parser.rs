@@ -172,6 +172,8 @@ pub struct StepModel {
     pub entity_count: usize,
     /// Mètres par unité de longueur du fichier (`0.001` pour un fichier en millimètres, `1.0` si inconnu).
     pub unit_scale: f64,
+    /// Faces ignorées parce que leur surface n'est pas prise en charge.
+    pub skipped_faces: usize,
 }
 
 /// Analyse un fichier STEP et reconstruit ses solides.
@@ -181,11 +183,12 @@ pub struct StepModel {
 /// Retourne une [`ParseError`] si le fichier est invalide.
 pub fn parse_step(input: &str) -> Result<StepModel, ParseError> {
     let file = parse_part21(input)?;
-    let solids = build_solids(&file)?;
+    let (solids, skipped_faces) = build_solids(&file)?;
     Ok(StepModel {
         solids,
         entity_count: file.entities.len(),
         unit_scale: length_unit_scale(&file),
+        skipped_faces,
     })
 }
 

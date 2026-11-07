@@ -131,21 +131,48 @@ fn sample_conic(
         .collect()
 }
 
-/// Courbe B-spline complète (non rationnelle), orientée pour partir de `from`.
+/// Courbe B-spline complète (rationnelle si des poids sont fournis), orientée pour partir de `from`.
 fn sample_bspline(spline: &BSplineCurve, from: Point3, to: Point3) -> Vec<Point3> {
     let degree = spline.degree;
     let count = spline.control_points.len();
     if count <= degree || spline.knots.len() != count + degree + 1 {
         return vec![from, to];
     }
+
+    // Courbe rationnelle : on interpole les points pondérés et les poids séparément.
+    let (control, weight_track): (Vec<Point3>, Option<Vec<Point3>>) = match &spline.weights {
+        Some(w) if w.len() == count => (
+            spline
+                .control_points
+                .iter()
+                .zip(w)
+                .map(|(p, &w)| [p[0] * w, p[1] * w, p[2] * w])
+                .collect(),
+            Some(w.iter().map(|&w| [w, 0.0, 0.0]).collect()),
+        ),
+        _ => (spline.control_points.clone(), None),
+    };
+
     let (t0, t1) = (spline.knots[degree], spline.knots[count]);
     let segments = (count * 4).max(8);
     let mut points: Vec<Point3> = (0..=segments)
         .map(|i| {
             let t = t0 + (t1 - t0) * i as f64 / segments as f64;
-            de_boor(degree, &spline.knots, &spline.control_points, t)
+            let p = de_boor(degree, &spline.knots, &control, t);
+            match &weight_track {
+                Some(track) => {
+                    let w = de_boor(degree, &spline.knots, track, t)[0];
+                    if w.abs() > 1e-12 {
+                        [p[0] / w, p[1] / w, p[2] / w]
+                    } else {
+                        p
+                    }
+                }
+                None => p,
+            }
         })
         .collect();
+
     let distance = |p: Point3| {
         let d = sub(p, from);
         dot(d, d)

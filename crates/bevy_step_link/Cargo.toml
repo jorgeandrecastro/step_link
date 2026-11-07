@@ -14,7 +14,7 @@ categories = ["game-development", "graphics", "rendering::data-formats"]
 
 [dependencies]
 step_link.workspace = true
-bevy = { workspace = true, features = ["bevy_asset", "bevy_render"] }
+bevy = { workspace = true, features = ["bevy_asset", "bevy_render", "bevy_log"] }
 
 [dev-dependencies]
 bevy = "0.20"

@@ -43,6 +43,12 @@ fn main() {
 
     match parse_step(&text) {
         Ok(model) => {
+            if model.skipped_faces > 0 {
+                println!(
+                    "{} face(s) ignorée(s) (surface non prise en charge)",
+                    model.skipped_faces
+                );
+            }
             for solid in &model.solids {
                 let planes = solid
                     .faces()

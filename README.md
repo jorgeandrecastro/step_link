@@ -54,7 +54,9 @@ Lexer et graphe `#id → entité` (`parse_part21`). Paramètres : références, 
 Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND → EDGE_LOOP → ORIENTED_EDGE → EDGE_CURVE → VERTEX_POINT → CARTESIAN_POINT`, surfaces (plan, cylindre, cône, sphère, tore) et courbes (droite, cercle, ellipse, B-spline). Validé sur un export réel de 63 faces.
 
 - [ ] `BREP_WITH_VOIDS`
-- [ ] Surfaces B-spline, B-splines rationnelles, `SURFACE_CURVE`
+- [x] Courbes B-splines rationnelles (entités complexes)
+- [ ] Surfaces B-spline et NURBS (lecture), `SURFACE_CURVE`
+- [x] Les faces à surface non prise en charge sont ignorées avec un avertissement, au lieu de faire échouer le fichier
 - [ ] Contour externe : sans `FACE_OUTER_BOUND`, le premier contour est supposé externe
 - [ ] Unités non SI (pouces, `CONVERSION_BASED_UNIT`)
 
@@ -64,7 +66,7 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 - [x] Discrétisation des arêtes partagée entre faces voisines
 - [x] Tolérance (flèche maximale) configurable (`tessellate_with_tolerance`)
 - [ ] Sphères et tores
-- [ ] NURBS : échantillonnage de la surface
+- [ ] Surfaces B-spline/NURBS : projection des contours en (u, v) et points intérieurs
 - [ ] Subdivision intérieure des faces courbes (seuls les points du bord sont utilisés)
 - [ ] Soudure des sommets entre faces
 - [ ] Vérifier le fond des trous coniques (artefact visible sur `WallHook_30mm`)

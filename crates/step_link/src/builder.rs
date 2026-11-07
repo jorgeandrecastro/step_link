@@ -4,7 +4,7 @@ use crate::brep::{
     BSplineCurve, Curve, Edge, EdgeId, Face, Frame, Loop, OrientedEdge, Point3, Shell, Solid,
     Surface, Vertex, VertexId,
 };
-use crate::parser::{EntityId, Param, ParseError, Record, StepFile};
+use crate::parser::{Entity, EntityId, Param, ParseError, Record, StepFile};
 use std::collections::HashMap;
 
 fn invalid(entity: EntityId, message: impl Into<String>) -> ParseError {
@@ -15,6 +15,7 @@ fn invalid(entity: EntityId, message: impl Into<String>) -> ParseError {
 }
 
 /// Accès typé aux paramètres d'un enregistrement.
+#[derive(Clone, Copy)]
 struct Args<'a> {
     id: EntityId,
     record: &'a Record,
@@ -93,6 +94,7 @@ struct Builder<'a> {
     edges: Vec<Edge>,
     vertex_ids: HashMap<EntityId, VertexId>,
     edge_ids: HashMap<EntityId, EdgeId>,
+    skipped_faces: usize,
 }
 
 impl<'a> Builder<'a> {
@@ -103,6 +105,7 @@ impl<'a> Builder<'a> {
             edges: Vec::new(),
             vertex_ids: HashMap::new(),
             edge_ids: HashMap::new(),
+            skipped_faces: 0,
         }
     }
 
@@ -142,10 +145,13 @@ impl<'a> Builder<'a> {
 
     fn curve(&self, id: EntityId) -> Result<Curve, ParseError> {
         let file: &'a StepFile = self.file;
-        let name = file
+        let entity = file
             .get(id)
-            .ok_or_else(|| invalid(id, "entité introuvable"))?
-            .name();
+            .ok_or_else(|| invalid(id, "entité introuvable"))?;
+        if entity.record("B_SPLINE_CURVE_WITH_KNOTS").is_some() {
+            return self.bspline_curve(id, entity);
+        }
+        let name = entity.name();
         match name {
             "LINE" => Ok(Curve::Line),
             "CIRCLE" => {
@@ -163,81 +169,101 @@ impl<'a> Builder<'a> {
                     semi_minor: args.real(3)?,
                 })
             }
-            "B_SPLINE_CURVE_WITH_KNOTS" => {
-                let args = self.args(id, name)?;
-                let degree = args.unsigned(args.param(1)?)?;
-                let control_points = args
-                    .references(2)?
-                    .into_iter()
-                    .map(|p| self.point(p))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let multiplicities = args
-                    .list(6)?
-                    .iter()
-                    .map(|p| args.unsigned(p))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let knots: Vec<f64> = args
-                    .reals(7)?
-                    .into_iter()
-                    .zip(multiplicities)
-                    .flat_map(|(knot, count)| std::iter::repeat_n(knot, count))
-                    .collect();
-                Ok(Curve::BSpline(BSplineCurve {
-                    degree,
-                    control_points,
-                    weights: None,
-                    knots,
-                }))
-            }
             other => Err(invalid(id, format!("courbe `{other}` non prise en charge"))),
         }
     }
 
-    fn surface(&self, id: EntityId) -> Result<Surface, ParseError> {
+    /// B-spline à nœuds, simple ou rationnelle (entité complexe).
+    fn bspline_curve(&self, id: EntityId, entity: &Entity) -> Result<Curve, ParseError> {
+        let (base, base_at, knots_args, knots_at) = if entity.is_complex() {
+            (
+                self.args(id, "B_SPLINE_CURVE")?,
+                0,
+                self.args(id, "B_SPLINE_CURVE_WITH_KNOTS")?,
+                0,
+            )
+        } else {
+            let args = self.args(id, "B_SPLINE_CURVE_WITH_KNOTS")?;
+            (args, 1, args, 6)
+        };
+
+        let degree = base.unsigned(base.param(base_at)?)?;
+        let control_points = base
+            .references(base_at + 1)?
+            .into_iter()
+            .map(|p| self.point(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let multiplicities = knots_args
+            .list(knots_at)?
+            .iter()
+            .map(|p| knots_args.unsigned(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let knots: Vec<f64> = knots_args
+            .reals(knots_at + 1)?
+            .into_iter()
+            .zip(multiplicities)
+            .flat_map(|(knot, count)| std::iter::repeat_n(knot, count))
+            .collect();
+        let weights = if entity.record("RATIONAL_B_SPLINE_CURVE").is_some() {
+            Some(self.args(id, "RATIONAL_B_SPLINE_CURVE")?.reals(0)?)
+        } else {
+            None
+        };
+
+        Ok(Curve::BSpline(BSplineCurve {
+            degree,
+            control_points,
+            weights,
+            knots,
+        }))
+    }
+
+    /// Surface prise en charge, ou `None` si son type n'est pas géré (la face est alors ignorée).
+    fn surface(&self, id: EntityId) -> Result<Option<Surface>, ParseError> {
         let file: &'a StepFile = self.file;
         let name = file
             .get(id)
             .ok_or_else(|| invalid(id, "entité introuvable"))?
             .name();
-        match name {
+        Ok(Some(match name {
             "PLANE" => {
                 let args = self.args(id, name)?;
-                Ok(Surface::Plane {
+                Surface::Plane {
                     frame: self.placement(args.reference(1)?)?,
-                })
+                }
             }
             "CYLINDRICAL_SURFACE" => {
                 let args = self.args(id, name)?;
-                Ok(Surface::Cylinder {
+                Surface::Cylinder {
                     frame: self.placement(args.reference(1)?)?,
                     radius: args.real(2)?,
-                })
+                }
             }
             "CONICAL_SURFACE" => {
                 let args = self.args(id, name)?;
-                Ok(Surface::Cone {
+                Surface::Cone {
                     frame: self.placement(args.reference(1)?)?,
                     radius: args.real(2)?,
                     semi_angle: args.real(3)?,
-                })
+                }
             }
             "SPHERICAL_SURFACE" => {
                 let args = self.args(id, name)?;
-                Ok(Surface::Sphere {
+                Surface::Sphere {
                     frame: self.placement(args.reference(1)?)?,
                     radius: args.real(2)?,
-                })
+                }
             }
             "TOROIDAL_SURFACE" => {
                 let args = self.args(id, name)?;
-                Ok(Surface::Torus {
+                Surface::Torus {
                     frame: self.placement(args.reference(1)?)?,
                     major_radius: args.real(2)?,
                     minor_radius: args.real(3)?,
-                })
+                }
             }
-            other => Err(invalid(id, format!("surface `{other}` non prise en charge"))),
-        }
+            _ => return Ok(None),
+        }))
     }
 
     fn vertex(&mut self, id: EntityId) -> Result<VertexId, ParseError> {
@@ -290,10 +316,14 @@ impl<'a> Builder<'a> {
         Ok(Loop { edges })
     }
 
-    fn face(&mut self, id: EntityId) -> Result<Face, ParseError> {
+    /// Construit une face, ou `None` (et la compte comme ignorée) si sa surface n'est pas gérée.
+    fn face(&mut self, id: EntityId) -> Result<Option<Face>, ParseError> {
         let file: &'a StepFile = self.file;
         let args = self.args(id, "ADVANCED_FACE")?;
-        let surface = self.surface(args.reference(2)?)?;
+        let Some(surface) = self.surface(args.reference(2)?)? else {
+            self.skipped_faces += 1;
+            return Ok(None);
+        };
         let same_sense = args.flag(3)?;
 
         let mut bounds = Vec::new();
@@ -320,27 +350,32 @@ impl<'a> Builder<'a> {
         let outer_index = bounds.iter().position(|(outer, _)| *outer).unwrap_or(0);
         let (_, outer_loop) = bounds.remove(outer_index);
         let inner_loops = bounds.into_iter().map(|(_, l)| l).collect();
-        Ok(Face {
+        Ok(Some(Face {
             surface,
             outer_loop,
             inner_loops,
             same_sense,
-        })
+        }))
     }
 
     fn shell(&mut self, id: EntityId) -> Result<Shell, ParseError> {
         let args = self.args(id, "CLOSED_SHELL")?;
         let mut faces = Vec::new();
         for face_id in args.references(1)? {
-            faces.push(self.face(face_id)?);
+            if let Some(face) = self.face(face_id)? {
+                faces.push(face);
+            }
         }
         Ok(Shell { faces })
     }
 }
 
 /// Reconstruit un [`Solid`] par `MANIFOLD_SOLID_BREP` présent dans le fichier.
-pub(crate) fn build_solids(file: &StepFile) -> Result<Vec<Solid>, ParseError> {
+///
+/// Retourne aussi le nombre de faces ignorées parce que leur surface n'est pas prise en charge.
+pub(crate) fn build_solids(file: &StepFile) -> Result<(Vec<Solid>, usize), ParseError> {
     let mut solids = Vec::new();
+    let mut skipped = 0;
     for (&id, entity) in &file.entities {
         if entity.name() != "MANIFOLD_SOLID_BREP" {
             continue;
@@ -348,13 +383,14 @@ pub(crate) fn build_solids(file: &StepFile) -> Result<Vec<Solid>, ParseError> {
         let mut builder = Builder::new(file);
         let args = builder.args(id, "MANIFOLD_SOLID_BREP")?;
         let shell = builder.shell(args.reference(1)?)?;
+        skipped += builder.skipped_faces;
         solids.push(Solid {
             vertices: builder.vertices,
             edges: builder.edges,
             shells: vec![shell],
         });
     }
-    Ok(solids)
+    Ok((solids, skipped))
 }
 
 #[cfg(test)]
@@ -395,6 +431,7 @@ mod tests {
     fn builds_triangle_face() {
         let model = parse_step(&file(TRIANGLE)).unwrap();
         assert_eq!(model.solids.len(), 1);
+        assert_eq!(model.skipped_faces, 0);
         let solid = &model.solids[0];
         assert_eq!(solid.vertices.len(), 3);
         assert_eq!(solid.edges.len(), 3);
@@ -409,11 +446,28 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_surface() {
+    fn skips_unsupported_surface() {
         let body = TRIANGLE.replace("PLANE('',#19)", "B_SPLINE_SURFACE_WITH_KNOTS('',#19)");
-        assert!(matches!(
-            parse_step(&file(&body)),
-            Err(ParseError::Invalid { entity: 20, .. })
-        ));
+        let model = parse_step(&file(&body)).unwrap();
+        assert_eq!(model.solids[0].face_count(), 0);
+        assert_eq!(model.skipped_faces, 1);
+    }
+
+    #[test]
+    fn reads_rational_bspline_curve_entity() {
+        let complex = "#9=(BOUNDED_CURVE() B_SPLINE_CURVE(1,(#1,#2),.UNSPECIFIED.,.F.,.F.) \
+            B_SPLINE_CURVE_WITH_KNOTS((2,2),(0.,1.),.UNSPECIFIED.) CURVE() \
+            GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE((1.,1.)) \
+            REPRESENTATION_ITEM(''));";
+        let body = TRIANGLE.replace("#9=LINE('',#1,#8);", complex);
+        let model = parse_step(&file(&body)).unwrap();
+        match &model.solids[0].edges[0].curve {
+            Curve::BSpline(c) => {
+                assert_eq!(c.degree, 1);
+                assert_eq!(c.knots, vec![0.0, 0.0, 1.0, 1.0]);
+                assert_eq!(c.weights, Some(vec![1.0, 1.0]));
+            }
+            other => panic!("courbe inattendue : {other:?}"),
+        }
     }
 }

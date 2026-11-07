@@ -73,6 +73,12 @@ impl AssetLoader for StepLoader {
         let text = String::from_utf8(bytes)?;
 
         let model = parse_step(&text)?;
+        if model.skipped_faces > 0 {
+            bevy::log::warn!(
+                "{} face(s) ignorée(s) : surface non prise en charge",
+                model.skipped_faces
+            );
+        }
         if model.solids.is_empty() {
             return Err(StepLoaderError::NoSolid);
         }
