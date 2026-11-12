@@ -5,7 +5,7 @@
 [![Downloads](https://img.shields.io/crates/d/step_link.svg)](https://crates.io/crates/step_link)
 [![License](https://img.shields.io/crates/l/step_link.svg)](#licence)
 [![CI](https://github.com/jorgeandrecastro/step_link/actions/workflows/ci.yml/badge.svg)](https://github.com/jorgeandrecastro/step_link/actions)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 Moteur géométrique **B-Rep** et parser **STEP (ISO 10303-21)** en pur Rust, pensé pour être utilisé notamment avec [Bevy](https://bevyengine.org).
 
@@ -26,16 +26,52 @@ Le projet est découpé en deux crates :
 | [`step_link`](https://crates.io/crates/step_link) | Cœur pur Rust : topologie B-Rep, parser STEP, tessellation. **Aucune dépendance Bevy.** |
 | [`bevy_step_link`](https://crates.io/crates/bevy_step_link) | `StepLinkPlugin` + `AssetLoader` Bevy : `.step` / `.stp` → `Mesh`. |
 
+## Arborescence du projet
+
+```text
+step_link/
+├── Cargo.toml
+├── Cargo.lock
+├── crates/
+│   ├── step_link/                 # Cœur pur Rust
+│   │   ├── examples/
+│   │   │   └── inspect.rs
+│   │   └── src/
+│   │       ├── brep.rs            # Modèle topologique B-Rep
+│   │       ├── builder.rs         # Reconstruction depuis les entités STEP
+│   │       ├── lib.rs
+│   │       ├── mesh/
+│   │       │   ├── mod.rs         # Tessellation et type MeshData
+│   │       │   ├── chart.rs       # Projection des surfaces dans l'espace UV
+│   │       │   ├── edges.rs       # Discrétisation et cache des arêtes
+│   │       │   ├── spline.rs      # Évaluation des courbes et surfaces B-spline
+│   │       │   └── triangulate.rs # Triangulation 2D avec trous
+│   │       └── parser.rs          # Parser Part 21
+│   └── bevy_step_link/            # Intégration Bevy
+│       ├── assets/
+│       │   └── models/
+│       │       └── part.step
+│       ├── examples/
+│       │   └── load_step.rs
+│       └── src/
+│           ├── lib.rs
+│           └── loader.rs
+├── images/
+│   └── image2.png
+├── LICENSE-APACHE
+└── LICENSE-MIT
+```
+
 ## État d'avancement
 
 - [x] Modèle B-Rep : `Solid` → `Shell` → `Face` (`Surface`, boucle externe et boucles internes) → `OrientedEdge` → `Edge` (`Curve`) → `Vertex`, arêtes partagées par index
-- [x] Tessellation : plans, cylindres, cônes, contours courbes et trous (*ear clipping*)
+- [x] Tessellation : plans, cylindres, cônes, sphères, tores, surfaces B-spline, contours courbes et trous (*ear clipping*)
 - [x] `AssetLoader` Bevy + plugin
 - [x] Parser Part 21 : en-tête, entités, paramètres typés, entités complexes, commentaires
 - [x] Reconstruction de la topologie à partir des entités STEP (plans, cylindres, cônes, sphères, tores ; droites, cercles, ellipses, B-splines)
 - [x] Validé sur un export réel (`WallHook_30mm.stp`) : affichage correct dans Bevy
 
-> Sphères, tores et surfaces B-spline ne sont pas encore tessellés : ces faces sont absentes du maillage.
+> Les sphères, tores et surfaces B-spline sont tessellés. Pour les surfaces B-spline/NURBS, seuls les contours sont actuellement triangulés : sans points intérieurs, les patchs courbes peuvent rester facettés.
 
 ## Roadmap
 
@@ -64,10 +100,9 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 ### 4. Tessellation (en cours)
 - [x] Plans : *ear clipping* avec trous
 - [x] Cylindres et cônes : triangulation dans l'espace paramétrique (angle, hauteur)
+- [x] Sphères et tores
 - [x] Discrétisation des arêtes partagée entre faces voisines
 - [x] Tolérance (flèche maximale) configurable (`tessellate_with_tolerance`)
-- [x] Tores
-- [ ] Sphères
 - [x] Surfaces B-spline/NURBS : projection des contours en (u, v), triangulation du contour seul
 - [ ] Surfaces B-spline/NURBS et tores : points intérieurs (sans eux, les patchs courbes sont facettés)
 - [ ] Subdivision intérieure des faces courbes (seuls les points du bord sont utilisés)
@@ -91,14 +126,14 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 ```toml
 [dependencies]
 bevy = "0.20"
-bevy_step_link = "0.2"
+bevy_step_link = "0.3"
 ```
 
 Pour utiliser uniquement le cœur, sans Bevy :
 
 ```toml
 [dependencies]
-step_link = "0.2"
+step_link = "0.3"
 ```
 
 ## Exemple (Bevy)
@@ -172,6 +207,16 @@ Inspection d'un fichier (comptage des entités, statistiques du solide) :
 cargo run -p step_link --example inspect -- piece.step
 ```
 
+Cette commande accepte un chemin `.step` ou `.stp`. Elle affiche les entités STEP, les solides reconstruits, les faces ignorées et le nombre de triangles ; les erreurs de lecture, de parsing ou de reconstruction sont affichées dans le terminal.
+
+Pour vérifier visuellement une nouvelle pièce avec Bevy, placez-la dans `crates/bevy_step_link/assets/models/part.step` (ou adaptez le chemin `models/part.step` dans `crates/bevy_step_link/examples/load_step.rs`), puis lancez :
+
+```sh
+cargo run -p bevy_step_link --example load_step
+```
+
+Le chargeur convertit les unités en mètres et les axes en Y-up. `cargo test --workspace` lance les tests automatisés du projet ; cette commande ne charge pas automatiquement un fichier STEP arbitraire.
+
 ## Développement
 
 ```sh
@@ -194,4 +239,3 @@ Distribué sous double licence, à votre choix :
 
 - [Apache License, Version 2.0](https://github.com/jorgeandrecastro/step_link/blob/main/LICENSE-APACHE)
 - [MIT license](https://github.com/jorgeandrecastro/step_link/blob/main/LICENSE-MIT)
-
