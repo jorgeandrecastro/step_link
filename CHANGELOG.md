@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0
+## 0.4.1
 
 ### Ajouté
 - Triangulation de Delaunay contrainte via `spade` : les contours sont des arêtes contraintes, les trous sont exclus.
@@ -15,5 +15,3 @@
 ### Dépendances
 - `spade 2`.
 
-## 0.3.0
-- Version initiale publiée sur crates.io.
