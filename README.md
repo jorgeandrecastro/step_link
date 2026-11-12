@@ -32,6 +32,7 @@ Le projet est découpé en deux crates :
 step_link/
 ├── Cargo.toml
 ├── Cargo.lock
+├── CHANGELOG.md
 ├── crates/
 │   ├── step_link/                 # Cœur pur Rust
 │   │   ├── examples/
@@ -45,7 +46,7 @@ step_link/
 │   │       │   ├── chart.rs       # Projection des surfaces dans l'espace UV
 │   │       │   ├── edges.rs       # Discrétisation et cache des arêtes
 │   │       │   ├── spline.rs      # Évaluation des courbes et surfaces B-spline
-│   │       │   └── triangulate.rs # Triangulation 2D avec trous
+│   │       │   └── triangulate.rs # Delaunay contraint (spade) + ear clipping de repli
 │   │       └── parser.rs          # Parser Part 21
 │   └── bevy_step_link/            # Intégration Bevy
 │       ├── assets/
@@ -65,13 +66,14 @@ step_link/
 ## État d'avancement
 
 - [x] Modèle B-Rep : `Solid` → `Shell` → `Face` (`Surface`, boucle externe et boucles internes) → `OrientedEdge` → `Edge` (`Curve`) → `Vertex`, arêtes partagées par index
-- [x] Tessellation : plans, cylindres, cônes, sphères, tores, surfaces B-spline, contours courbes et trous (*ear clipping*)
+- [x] Tessellation : plans, cylindres, cônes, sphères, tores, surfaces B-spline, contours courbes et trous (Delaunay contraint via [`spade`](https://crates.io/crates/spade), *ear clipping* en repli)
+- [x] Points intérieurs et normales analytiques sur les sphères, tores et surfaces B-spline/NURBS (0.4)
 - [x] `AssetLoader` Bevy + plugin
 - [x] Parser Part 21 : en-tête, entités, paramètres typés, entités complexes, commentaires
 - [x] Reconstruction de la topologie à partir des entités STEP (plans, cylindres, cônes, sphères, tores ; droites, cercles, ellipses, B-splines)
 - [x] Validé sur un export réel (`WallHook_30mm.stp`) : affichage correct dans Bevy
 
-> Les sphères, tores et surfaces B-spline sont tessellés. Pour les surfaces B-spline/NURBS, seuls les contours sont actuellement triangulés : sans points intérieurs, les patchs courbes peuvent rester facettés.
+> Depuis la 0.4, les faces courbes (sphères, tores, B-splines/NURBS) reçoivent des points intérieurs dont la densité suit la tolérance : elles ne sont plus facettées. Cylindres et cônes (surfaces réglées) restent triangulés par leurs contours.
 
 ## Roadmap
 
@@ -98,14 +100,16 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 - [ ] Unités non SI (pouces, `CONVERSION_BASED_UNIT`)
 
 ### 4. Tessellation (en cours)
-- [x] Plans : *ear clipping* avec trous
+- [x] Plans : Delaunay contraint avec trous
 - [x] Cylindres et cônes : triangulation dans l'espace paramétrique (angle, hauteur)
 - [x] Sphères et tores
 - [x] Discrétisation des arêtes partagée entre faces voisines
 - [x] Tolérance (flèche maximale) configurable (`tessellate_with_tolerance`)
-- [x] Surfaces B-spline/NURBS : projection des contours en (u, v), triangulation du contour seul
-- [ ] Surfaces B-spline/NURBS et tores : points intérieurs (sans eux, les patchs courbes sont facettés)
-- [ ] Subdivision intérieure des faces courbes (seuls les points du bord sont utilisés)
+- [x] Surfaces B-spline/NURBS : projection des contours en (u, v)
+- [x] Surfaces B-spline/NURBS, sphères et tores : points intérieurs
+- [x] Subdivision intérieure des faces courbes (grille en nid d'abeille dans l'espace UV)
+- [x] Repli sur l'*ear clipping* si les contours sont pathologiques
+- [ ] Points intérieurs pour cylindres et cônes (rails angulaires) si des facettes restent visibles
 - [ ] Soudure des sommets entre faces
 - [ ] Vérifier le fond des trous coniques (artefact visible sur `WallHook_30mm`)
 
@@ -119,21 +123,21 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 ### 6. Robustesse et publication
 - [ ] Corpus de pièces de complexité croissante : cube, cylindre percé, pièce avec congés
 - [ ] Documentation et exemples complets
-- [ ] Publication sur crates.io
+- [x] Publication sur crates.io
 
 ## Installation
 
 ```toml
 [dependencies]
 bevy = "0.20"
-bevy_step_link = "0.3"
+bevy_step_link = "0.4"
 ```
 
 Pour utiliser uniquement le cœur, sans Bevy :
 
 ```toml
 [dependencies]
-step_link = "0.3"
+step_link = "0.4"
 ```
 
 ## Exemple (Bevy)

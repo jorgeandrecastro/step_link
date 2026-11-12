@@ -1,14 +1,17 @@
 //! Tessellation : conversion d'un [`Solid`] B-Rep en maillage triangulaire.
 //!
 //! Les arêtes sont discrétisées une fois et partagées entre faces voisines.
-//! Chaque face est ensuite projetée dans l'espace de sa surface et triangulée par
-//! *ear clipping*. Plans, cylindres, cônes, sphères, tores et surfaces B-spline sont pris en charge.
+//! Chaque face est ensuite projetée dans l'espace de sa surface puis triangulée par
+//! Delaunay contraint (`spade`) : les contours sont des arêtes contraintes, et les surfaces
+//! courbes (sphères, tores, B-splines) reçoivent des points intérieurs dont la densité dépend
+//! de la tolérance. En cas de contour pathologique, on retombe sur l'*ear clipping*.
+//! Plans, cylindres, cônes, sphères, tores et surfaces B-spline sont pris en charge.
 //!
 //! Organisation du module :
 //! - `edges` : discrétisation des arêtes et des boucles
 //! - `spline` : évaluation de Boor, courbes et surfaces B-spline
 //! - `chart` : projection d'une surface dans son espace paramétrique
-//! - `triangulate` : triangulation 2D avec trous
+//! - `triangulate` : triangulation 2D avec trous et points intérieurs
 
 mod chart;
 mod edges;
@@ -19,7 +22,7 @@ use crate::brep::{Face, Point3, Solid, sub, dot};
 use chart::{Chart, unwrap_axis};
 use edges::{EdgeCache, loop_polyline};
 use std::f64::consts::TAU;
-use triangulate::{area, triangulate};
+use triangulate::{Triangulation, area, triangulate_refined};
 
 /// Flèche maximale par défaut, dans l'unité du modèle (millimètres pour la plupart des exports CAO).
 pub const DEFAULT_TOLERANCE: f64 = 0.05;
@@ -27,6 +30,7 @@ pub const DEFAULT_TOLERANCE: f64 = 0.05;
 /// Maillage triangulaire indépendant de tout moteur de rendu.
 ///
 /// Les sommets sont dupliqués par face afin que chaque face possède ses propres normales.
+/// Les sommets intérieurs des surfaces courbes ont des normales analytiques.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MeshData {
     /// Positions des sommets.
@@ -130,13 +134,32 @@ fn tessellate_face(
         p[1] *= scale[1];
     }
 
-    let triangles = triangulate(&loops2d[0], &loops2d[1..]);
+    // Pas des points intérieurs, converti dans l'espace 2D mis à l'échelle.
+    let step = chart
+        .param_steps(tolerance)
+        .map(|s| [s[0] * scale[0], s[1] * scale[1]]);
+    let Triangulation {
+        points,
+        source,
+        triangles,
+    } = triangulate_refined(&loops2d[0], &loops2d[1..], step);
 
     let sign = if face.same_sense { 1.0 } else { -1.0 };
     let base = mesh.positions.len() as u32;
-    for &p in loops3d.iter().flatten() {
+    let boundary: Vec<Point3> = loops3d.iter().flatten().copied().collect();
+    for (q, &src) in points.iter().zip(&source) {
+        let (p, normal) = match boundary.get(src) {
+            // Point de contour : position exacte, partagée avec les faces voisines.
+            Some(&p) => (p, chart.normal(p)),
+            // Point intérieur : position et normale analytiques depuis (u, v).
+            None => {
+                let uv = [q[0] / scale[0], q[1] / scale[1]];
+                let p = chart.point(uv);
+                (p, chart.normal_uv(uv, p))
+            }
+        };
         mesh.positions.push(p.map(|c| c as f32));
-        mesh.normals.push(chart.normal(p).map(|c| (c * sign) as f32));
+        mesh.normals.push(normal.map(|c| (c * sign) as f32));
     }
     for [a, b, c] in triangles {
         let (b, c) = if face.same_sense { (b, c) } else { (c, b) };
@@ -155,5 +178,11 @@ mod tests {
         assert_eq!(mesh.triangle_count(), 12);
         assert_eq!(mesh.positions.len(), 24);
         assert_eq!(mesh.normals.len(), 24);
+    }
+
+    #[test]
+    fn indices_stay_in_bounds() {
+        let mesh = tessellate(&Solid::cuboid(1.0, 2.0, 3.0));
+        assert!(mesh.indices.iter().all(|&i| (i as usize) < mesh.positions.len()));
     }
 }

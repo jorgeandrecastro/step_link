@@ -28,6 +28,12 @@ fn radial_direction(frame: &Frame, p: Point3) -> Point3 {
     normalize(std::array::from_fn(|k| d[k] - h * frame.z[k]))
 }
 
+/// Point exprimé dans le repère local `(x, y, z)` converti en coordonnées globales.
+fn from_local(f: &Frame, c: Point3) -> Point3 {
+    let y = f.y();
+    std::array::from_fn(|k| f.origin[k] + c[0] * f.x[k] + c[1] * y[k] + c[2] * f.z[k])
+}
+
 impl Chart {
     pub(super) fn from_surface(surface: &Surface) -> Option<Self> {
         match surface {
@@ -101,6 +107,54 @@ impl Chart {
         }
     }
 
+    /// Normale en un point dont on connaît déjà `(u, v)` (évite l'inversion pour les B-splines).
+    pub(super) fn normal_uv(&self, uv: [f64; 2], p: Point3) -> Point3 {
+        match self {
+            Self::BSpline(s) => s.normal_uv(uv[0], uv[1]),
+            _ => self.normal(p),
+        }
+    }
+
+    /// Point 3D pour des coordonnées `(u, v)` non mises à l'échelle.
+    ///
+    /// Cylindres et cônes n'ont jamais de points intérieurs (voir [`Self::param_steps`]) :
+    /// ils se replient sur l'origine du repère.
+    pub(super) fn point(&self, uv: [f64; 2]) -> Point3 {
+        let [u, v] = uv;
+        match self {
+            Self::Plane(f) => from_local(f, [u, v, 0.0]),
+            Self::Cylinder(f) | Self::Cone(f, _) => f.origin,
+            Self::Sphere(f, r) => from_local(
+                f,
+                [r * v.cos() * u.cos(), r * v.cos() * u.sin(), r * v.sin()],
+            ),
+            Self::Torus(f, major, minor) => {
+                let rr = major + minor * v.cos();
+                from_local(f, [rr * u.cos(), rr * u.sin(), minor * v.sin()])
+            }
+            Self::BSpline(s) => s.eval(u, v),
+        }
+    }
+
+    /// Pas des points intérieurs, en unités de paramètre (radians ou paramètre B-spline).
+    /// `None` : surface plane ou réglée, les contours suffisent.
+    pub(super) fn param_steps(&self, tolerance: f64) -> Option<[f64; 2]> {
+        // Pas angulaire dont la flèche sur un cercle de rayon `radius` reste sous `tolerance`.
+        let angle = |radius: f64| {
+            let ratio = (tolerance / radius.max(1e-9)).min(1.0);
+            (2.0 * (1.0 - ratio).acos()).clamp(0.02, 1.0)
+        };
+        match self {
+            Self::Plane(_) | Self::Cylinder(_) | Self::Cone(..) => None,
+            Self::Sphere(_, radius) => {
+                let a = angle(*radius);
+                Some([a, a])
+            }
+            Self::Torus(_, major, minor) => Some([angle(major + minor), angle(*minor)]),
+            Self::BSpline(s) => Some(s.param_steps(tolerance)),
+        }
+    }
+
     /// Facteurs appliqués à `(u, v)` pour obtenir des coordonnées 2D proches du métrique.
     pub(super) fn scale(&self, loops: &[Vec<Point3>]) -> [f64; 2] {
         match self {
@@ -169,5 +223,31 @@ mod tests {
         let north = [0.0, 0.0, 5.0];
         assert!((chart.uv(north)[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
         assert!(dist(chart.normal(north), [0.0, 0.0, 1.0]) < 1e-9);
+    }
+
+    #[test]
+    fn sphere_point_roundtrip() {
+        let frame = Frame::from_normal([1.0, 2.0, 3.0], [0.0, 0.0, 1.0]);
+        let chart = Chart::Sphere(frame, 5.0);
+        let p = chart.point([0.3, 0.2]);
+        let [u, v] = chart.uv(p);
+        assert!((u - 0.3).abs() < 1e-9 && (v - 0.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn torus_point_roundtrip() {
+        let frame = Frame::from_normal([0.0; 3], [0.0, 0.0, 1.0]);
+        let chart = Chart::Torus(frame, 10.0, 2.0);
+        let p = chart.point([0.7, -0.4]);
+        let [u, v] = chart.uv(p);
+        assert!((u - 0.7).abs() < 1e-9 && (v + 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ruled_surfaces_have_no_interior_points() {
+        let frame = Frame::from_normal([0.0; 3], [0.0, 0.0, 1.0]);
+        assert!(Chart::Plane(frame).param_steps(0.05).is_none());
+        assert!(Chart::Cylinder(frame).param_steps(0.05).is_none());
+        assert!(Chart::Sphere(frame, 5.0).param_steps(0.05).is_some());
     }
 }

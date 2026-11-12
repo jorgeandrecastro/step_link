@@ -13,3 +13,4 @@ keywords = ["step", "brep", "cad", "mesh", "tessellation"]
 categories = ["parser-implementations", "graphics", "mathematics"]
 
 [dependencies]
+spade.workspace = true

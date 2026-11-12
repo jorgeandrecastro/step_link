@@ -94,6 +94,8 @@ pub(super) struct SplineChart {
     domain: [[f64; 2]; 2],
     /// Échantillons `((u, v), point)` pour la recherche grossière du point le plus proche.
     grid: Vec<([f64; 2], Point3)>,
+    /// Cellules de la grille d'échantillonnage `[gu, gv]`.
+    cells: [usize; 2],
     /// Longueur 3D approximative par unité de paramètre, pour des coordonnées 2D proches du métrique.
     pub(super) scale: [f64; 2],
 }
@@ -150,11 +152,13 @@ impl SplineChart {
             weights,
             domain,
             grid: Vec::new(),
+            cells: [0, 0],
             scale: [1.0, 1.0],
         };
 
         let gu = (nu * 3).clamp(8, 40);
         let gv = (nv * 3).clamp(8, 40);
+        chart.cells = [gu, gv];
         let [[u0, u1], [v0, v1]] = domain;
         for i in 0..=gu {
             for j in 0..=gv {
@@ -199,6 +203,8 @@ impl SplineChart {
     }
 
     pub(super) fn eval(&self, u: f64, v: f64) -> Point3 {
+        let u = u.clamp(self.domain[0][0], self.domain[0][1]);
+        let v = v.clamp(self.domain[1][0], self.domain[1][1]);
         let p = self.blend(&self.control, u, v);
         match &self.weights {
             Some(weights) => {
@@ -222,6 +228,46 @@ impl SplineChart {
         let su = scaled(sub(self.eval(ub, v), self.eval(ua, v)), 1.0 / (ub - ua));
         let sv = scaled(sub(self.eval(u, vb), self.eval(u, va)), 1.0 / (vb - va));
         (su, sv)
+    }
+
+    /// Pas `(du, dv)` tel que la flèche d'une corde de cette longueur reste sous `tolerance`.
+    ///
+    /// Estimé par la déviation du point central de cordes à 2 cellules sur la grille
+    /// d'échantillonnage : la flèche croît comme le carré de la longueur de la corde.
+    pub(super) fn param_steps(&self, tolerance: f64) -> [f64; 2] {
+        let [gu, gv] = self.cells;
+        let stride = gv + 1;
+        let at = |i: usize, j: usize| self.grid[i * stride + j].1;
+        let deviation = |a: Point3, b: Point3, c: Point3| {
+            let mid = [
+                (a[0] + c[0]) / 2.0,
+                (a[1] + c[1]) / 2.0,
+                (a[2] + c[2]) / 2.0,
+            ];
+            dist(b, mid)
+        };
+        let (mut dev_u, mut dev_v) = (0.0f64, 0.0f64);
+        for i in 1..gu {
+            for j in 0..=gv {
+                dev_u = dev_u.max(deviation(at(i - 1, j), at(i, j), at(i + 1, j)));
+            }
+        }
+        for i in 0..=gu {
+            for j in 1..gv {
+                dev_v = dev_v.max(deviation(at(i, j - 1), at(i, j), at(i, j + 1)));
+            }
+        }
+        let [[u0, u1], [v0, v1]] = self.domain;
+        let steps = |dev: f64, cells: usize, span: f64| {
+            let cells = cells.max(1) as f64;
+            let m = if dev > 1e-12 {
+                (2.0 * (tolerance / dev).sqrt()).clamp(1.0, cells)
+            } else {
+                cells
+            };
+            span * m / cells
+        };
+        [steps(dev_u, gu, u1 - u0), steps(dev_v, gv, v1 - v0)]
     }
 
     /// Paramètres `(u, v)` du point de la surface le plus proche de `p`.
@@ -256,6 +302,11 @@ impl SplineChart {
 
     pub(super) fn normal(&self, p: Point3) -> Point3 {
         let [u, v] = self.invert(p);
+        self.normal_uv(u, v)
+    }
+
+    /// Normale en `(u, v)`, sans passer par l'inversion d'un point.
+    pub(super) fn normal_uv(&self, u: f64, v: f64) -> Point3 {
         let (su, sv) = self.partials(u, v);
         normalize(cross(su, sv))
     }
@@ -265,10 +316,9 @@ impl SplineChart {
 mod tests {
     use super::*;
 
-    #[test]
-    fn inverts_bspline_surface_point() {
+    fn flat_surface() -> BSplineSurface {
         // Surface plane S(u, v) = (4u, 2v, 0).
-        let surface = BSplineSurface {
+        BSplineSurface {
             degree_u: 1,
             degree_v: 1,
             control_points: vec![
@@ -278,12 +328,26 @@ mod tests {
             weights: None,
             knots_u: vec![0.0, 0.0, 1.0, 1.0],
             knots_v: vec![0.0, 0.0, 1.0, 1.0],
-        };
-        let chart = SplineChart::new(&surface).unwrap();
+        }
+    }
+
+    #[test]
+    fn inverts_bspline_surface_point() {
+        let chart = SplineChart::new(&flat_surface()).unwrap();
         let [u, v] = chart.invert([1.0, 1.5, 0.0]);
         assert!((u - 0.25).abs() < 1e-6);
         assert!((v - 0.75).abs() < 1e-6);
         let normal = chart.normal([1.0, 1.5, 0.0]);
+        assert!(dist(normal, [0.0, 0.0, 1.0]) < 1e-6);
+    }
+
+    #[test]
+    fn flat_surface_needs_coarse_steps() {
+        let chart = SplineChart::new(&flat_surface()).unwrap();
+        let [du, dv] = chart.param_steps(0.05);
+        // Une surface plane n'a aucune flèche : le pas couvre tout le domaine.
+        assert!((du - 1.0).abs() < 1e-9 && (dv - 1.0).abs() < 1e-9);
+        let normal = chart.normal_uv(0.5, 0.5);
         assert!(dist(normal, [0.0, 0.0, 1.0]) < 1e-6);
     }
 }
