@@ -64,6 +64,11 @@ fn main() {
                     holes,
                     tessellate(solid).triangle_count()
                 );
+                let colored_faces = solid.faces().filter(|f| f.color.is_some()).count();
+                println!(
+                    "  couleur du solide : {:?}, faces colorées : {colored_faces}",
+                    solid.color
+                );
             }
         }
         Err(e) => eprintln!("erreur de reconstruction : {e}"),

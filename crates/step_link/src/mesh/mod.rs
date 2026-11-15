@@ -18,7 +18,7 @@ mod edges;
 mod spline;
 mod triangulate;
 
-use crate::brep::{Face, Point3, Solid, sub, dot};
+use crate::brep::{Face, Point3, Solid, dot, sub};
 use chart::{Chart, unwrap_axis};
 use edges::{EdgeCache, loop_polyline};
 use std::f64::consts::TAU;
@@ -26,6 +26,9 @@ use triangulate::{Triangulation, area, triangulate_refined};
 
 /// Flèche maximale par défaut, dans l'unité du modèle (millimètres pour la plupart des exports CAO).
 pub const DEFAULT_TOLERANCE: f64 = 0.05;
+
+/// Couleur des faces sans couleur propre dans un maillage où d'autres faces sont colorées.
+pub const DEFAULT_COLOR: [f32; 3] = [0.8, 0.8, 0.8];
 
 /// Maillage triangulaire indépendant de tout moteur de rendu.
 ///
@@ -37,6 +40,8 @@ pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     /// Normales par sommet (même longueur que `positions`).
     pub normals: Vec<[f32; 3]>,
+    /// Couleurs RGB (sRGB) par sommet. Vide si aucune face n'est colorée, sinon de même longueur que `positions`.
+    pub colors: Vec<[f32; 3]>,
     /// Indices de triangles (3 par triangle).
     pub indices: Vec<u32>,
 }
@@ -58,8 +63,9 @@ pub fn tessellate_with_tolerance(solid: &Solid, tolerance: f64) -> MeshData {
     let tolerance = tolerance.max(1e-6);
     let mut mesh = MeshData::default();
     let mut cache = EdgeCache::new();
+    let colored = solid.color.is_some() || solid.faces().any(|f| f.color.is_some());
     for face in solid.faces() {
-        tessellate_face(solid, face, &mut cache, tolerance, &mut mesh);
+        tessellate_face(solid, face, colored, &mut cache, tolerance, &mut mesh);
     }
     mesh
 }
@@ -76,6 +82,7 @@ pub(crate) fn scaled(v: Point3, k: f64) -> Point3 {
 fn tessellate_face(
     solid: &Solid,
     face: &Face,
+    colored: bool,
     cache: &mut EdgeCache,
     tolerance: f64,
     mesh: &mut MeshData,
@@ -145,6 +152,7 @@ fn tessellate_face(
     } = triangulate_refined(&loops2d[0], &loops2d[1..], step);
 
     let sign = if face.same_sense { 1.0 } else { -1.0 };
+    let color = face.color.or(solid.color).unwrap_or(DEFAULT_COLOR);
     let base = mesh.positions.len() as u32;
     let boundary: Vec<Point3> = loops3d.iter().flatten().copied().collect();
     for (q, &src) in points.iter().zip(&source) {
@@ -160,6 +168,9 @@ fn tessellate_face(
         };
         mesh.positions.push(p.map(|c| c as f32));
         mesh.normals.push(normal.map(|c| (c * sign) as f32));
+        if colored {
+            mesh.colors.push(color);
+        }
     }
     for [a, b, c] in triangles {
         let (b, c) = if face.same_sense { (b, c) } else { (c, b) };
@@ -184,5 +195,18 @@ mod tests {
     fn indices_stay_in_bounds() {
         let mesh = tessellate(&Solid::cuboid(1.0, 2.0, 3.0));
         assert!(mesh.indices.iter().all(|&i| (i as usize) < mesh.positions.len()));
+    }
+
+    #[test]
+    fn colors_follow_solid_and_face() {
+        let mut solid = Solid::cuboid(1.0, 1.0, 1.0);
+        assert!(tessellate(&solid).colors.is_empty());
+
+        solid.color = Some([1.0, 0.0, 0.0]);
+        solid.shells[0].faces[0].color = Some([0.0, 1.0, 0.0]);
+        let mesh = tessellate(&solid);
+        assert_eq!(mesh.colors.len(), mesh.positions.len());
+        assert_eq!(mesh.colors.iter().filter(|c| **c == [0.0, 1.0, 0.0]).count(), 4);
+        assert_eq!(mesh.colors.iter().filter(|c| **c == [1.0, 0.0, 0.0]).count(), 20);
     }
 }

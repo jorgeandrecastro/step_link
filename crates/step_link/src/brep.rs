@@ -13,7 +13,10 @@ pub type VertexId = usize;
 /// Index d'une arête dans [`Solid::edges`].
 pub type EdgeId = usize;
 
-pub(crate) fn dot(a: Point3, b: Point3) -> f64  {
+/// Couleur RGB (sRGB, composantes entre 0 et 1).
+pub type Color = [f32; 3];
+
+pub(crate) fn dot(a: Point3, b: Point3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
@@ -207,7 +210,6 @@ pub struct Edge {
     pub curve: Curve,
     /// `true` si la courbe est parcourue dans le même sens que l'arête (de `start` vers `end`).
     pub same_sense: bool,
-
 }
 
 /// Utilisation d'une arête dans une boucle, avec son sens de parcours.
@@ -237,6 +239,8 @@ pub struct Face {
     pub inner_loops: Vec<Loop>,
     /// `true` si la normale de la face suit celle de la surface, `false` si elle est inversée.
     pub same_sense: bool,
+    /// Couleur propre à la face, prioritaire sur celle du solide.
+    pub color: Option<Color>,
 }
 
 /// Coque : ensemble connexe de faces.
@@ -255,6 +259,8 @@ pub struct Solid {
     pub edges: Vec<Edge>,
     /// Coques (la première est la coque externe).
     pub shells: Vec<Shell>,
+    /// Couleur du solide, utilisée par les faces sans couleur propre.
+    pub color: Option<Color>,
 }
 
 impl Solid {
@@ -321,6 +327,7 @@ impl Solid {
                 outer_loop: polygon_loop(&mut edges, &ids),
                 inner_loops: Vec::new(),
                 same_sense: true,
+                color: None,
             });
         }
 
@@ -328,6 +335,7 @@ impl Solid {
             vertices,
             edges,
             shells: vec![Shell { faces }],
+            color: None,
         }
     }
 }
@@ -346,7 +354,7 @@ fn oriented_edge(edges: &mut Vec<Edge>, a: VertexId, b: VertexId) -> OrientedEdg
             forward: false,
         };
     }
-        edges.push(Edge {
+    edges.push(Edge {
         start: a,
         end: b,
         curve: Curve::Line,

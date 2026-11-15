@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+### Ajouté
+- Lecture des couleurs STEP déclarées par `STYLED_ITEM`, au niveau des solides et des faces.
+- Conservation des couleurs RGB dans `MeshData` et affichage comme couleurs de sommets dans Bevy.
+- Priorité à la couleur de face sur celle du solide ; teinte neutre pour les faces non colorées d’un maillage coloré.
+
 ## 0.4.1
 
 ### Ajouté
@@ -14,4 +21,3 @@
 
 ### Dépendances
 - `spade 2`.
-

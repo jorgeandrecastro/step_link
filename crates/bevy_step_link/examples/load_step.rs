@@ -35,11 +35,12 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Le .step est chargé directement comme un Mesh, déjà en mètres et en Y-up.
+    // Les couleurs du fichier sont portées par le maillage : le matériau reste blanc.
     let mesh: Handle<Mesh> = asset_server.load("models/part.step");
 
     commands.spawn((
         Mesh3d(mesh),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        MeshMaterial3d(materials.add(Color::WHITE)),
         Transform::from_scale(Vec3::splat(SCALE)),
     ));
 

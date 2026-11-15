@@ -68,12 +68,15 @@ step_link/
 - [x] Modèle B-Rep : `Solid` → `Shell` → `Face` (`Surface`, boucle externe et boucles internes) → `OrientedEdge` → `Edge` (`Curve`) → `Vertex`, arêtes partagées par index
 - [x] Tessellation : plans, cylindres, cônes, sphères, tores, surfaces B-spline, contours courbes et trous (Delaunay contraint via [`spade`](https://crates.io/crates/spade), *ear clipping* en repli)
 - [x] Points intérieurs et normales analytiques sur les sphères, tores et surfaces B-spline/NURBS (0.4)
+- [x] Couleurs STEP des solides et des faces (`STYLED_ITEM`) transférées au maillage et rendues dans Bevy (0.5)
 - [x] `AssetLoader` Bevy + plugin
 - [x] Parser Part 21 : en-tête, entités, paramètres typés, entités complexes, commentaires
 - [x] Reconstruction de la topologie à partir des entités STEP (plans, cylindres, cônes, sphères, tores ; droites, cercles, ellipses, B-splines)
 - [x] Validé sur un export réel (`WallHook_30mm.stp`) : affichage correct dans Bevy
 
 > Depuis la 0.4, les faces courbes (sphères, tores, B-splines/NURBS) reçoivent des points intérieurs dont la densité suit la tolérance : elles ne sont plus facettées. Cylindres et cônes (surfaces réglées) restent triangulés par leurs contours.
+
+Depuis la 0.5, les couleurs STEP des solides et des faces sont conservées dans le maillage. Une couleur de face est prioritaire sur celle du solide ; les faces sans couleur reçoivent une teinte neutre lorsqu’un maillage contient des couleurs.
 
 ## Roadmap
 
@@ -118,7 +121,7 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 - [x] Conversion d'unités et d'axes (mm / Z-up vers m / Y-up) faite par le loader
 - [ ] Plusieurs solides et assemblages (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`, transformations)
 - [ ] Réglages du loader (tolérance, échelle) via `type Settings`
-- [ ] Couleurs (`STYLED_ITEM`)
+- [x] Couleurs (`STYLED_ITEM`) des solides et des faces, rendues comme couleurs de sommets
 
 ### 6. Robustesse et publication
 - [ ] Corpus de pièces de complexité croissante : cube, cylindre percé, pièce avec congés
@@ -130,14 +133,14 @@ Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND �
 ```toml
 [dependencies]
 bevy = "0.20"
-bevy_step_link = "0.4"
+bevy_step_link = "0.5"
 ```
 
 Pour utiliser uniquement le cœur, sans Bevy :
 
 ```toml
 [dependencies]
-step_link = "0.4"
+step_link = "0.5"
 ```
 
 ## Exemple (Bevy)

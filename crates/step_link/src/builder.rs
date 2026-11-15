@@ -1,8 +1,8 @@
 //! Conversion du graphe d'entités STEP en [`Solid`] B-Rep.
 
 use crate::brep::{
-    BSplineCurve, BSplineSurface, Curve, Edge, EdgeId, Face, Frame, Loop, OrientedEdge, Point3,
-    Shell, Solid, Surface, Vertex, VertexId,
+    BSplineCurve, BSplineSurface, Color, Curve, Edge, EdgeId, Face, Frame, Loop, OrientedEdge,
+    Point3, Shell, Solid, Surface, Vertex, VertexId,
 };
 use crate::parser::{Entity, EntityId, Param, ParseError, Record, StepFile};
 use std::collections::HashMap;
@@ -103,8 +103,94 @@ fn expand_knots(args: &Args, mults_at: usize, knots_at: usize) -> Result<Vec<f64
         .collect())
 }
 
+fn find_record<'a>(file: &'a StepFile, id: EntityId, name: &str) -> Option<&'a Record> {
+    file.get(id)?.record(name)
+}
+
+fn ref_param(rec: &Record, index: usize) -> Option<EntityId> {
+    rec.params.get(index)?.as_id()
+}
+
+fn refs_param(rec: &Record, index: usize) -> Vec<EntityId> {
+    rec.params
+        .get(index)
+        .and_then(Param::as_list)
+        .map(|items| items.iter().filter_map(Param::as_id).collect::<Vec<_>>())
+        .unwrap_or_default()
+}
+
+/// Couleur de remplissage d'un `PRESENTATION_STYLE_ASSIGNMENT`.
+fn style_color(file: &StepFile, style: EntityId) -> Option<Color> {
+    let assignment = find_record(file, style, "PRESENTATION_STYLE_ASSIGNMENT")?;
+    for usage_id in refs_param(assignment, 0) {
+        let Some(usage) = find_record(file, usage_id, "SURFACE_STYLE_USAGE") else {
+            continue;
+        };
+        let Some(side) =
+            ref_param(usage, 1).and_then(|id| find_record(file, id, "SURFACE_SIDE_STYLE"))
+        else {
+            continue;
+        };
+        for element in refs_param(side, 1) {
+            let Some(fill) = find_record(file, element, "SURFACE_STYLE_FILL_AREA") else {
+                continue;
+            };
+            let Some(area) =
+                ref_param(fill, 0).and_then(|id| find_record(file, id, "FILL_AREA_STYLE"))
+            else {
+                continue;
+            };
+            for item in refs_param(area, 1) {
+                let Some(colour) = find_record(file, item, "FILL_AREA_STYLE_COLOUR") else {
+                    continue;
+                };
+                let Some(rgb) =
+                    ref_param(colour, 1).and_then(|id| find_record(file, id, "COLOUR_RGB"))
+                else {
+                    continue;
+                };
+                let channels: Vec<f32> = rgb
+                    .params
+                    .iter()
+                    .skip(1)
+                    .filter_map(Param::as_f64)
+                    .map(|c| c as f32)
+                    .collect();
+                if let [r, g, b] = channels[..] {
+                    return Some([r, g, b]);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Couleurs déclarées par les `STYLED_ITEM`, indexées par l'entité colorée (solide ou face).
+fn collect_colors(file: &StepFile) -> HashMap<EntityId, Color> {
+    let mut colors = HashMap::new();
+    for entity in file.entities.values() {
+        let Some(styled) = entity
+            .record("STYLED_ITEM")
+            .or_else(|| entity.record("OVER_RIDING_STYLED_ITEM"))
+        else {
+            continue;
+        };
+        let Some(item) = styled.params.get(2).and_then(Param::as_id) else {
+            continue;
+        };
+        if let Some(color) = refs_param(styled, 1)
+            .into_iter()
+            .find_map(|style| style_color(file, style))
+        {
+            colors.insert(item, color);
+        }
+    }
+    colors
+}
+
 struct Builder<'a> {
     file: &'a StepFile,
+    colors: &'a HashMap<EntityId, Color>,
     vertices: Vec<Vertex>,
     edges: Vec<Edge>,
     vertex_ids: HashMap<EntityId, VertexId>,
@@ -113,9 +199,10 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(file: &'a StepFile) -> Self {
+    fn new(file: &'a StepFile, colors: &'a HashMap<EntityId, Color>) -> Self {
         Self {
             file,
+            colors,
             vertices: Vec::new(),
             edges: Vec::new(),
             vertex_ids: HashMap::new(),
@@ -233,7 +320,7 @@ impl<'a> Builder<'a> {
         }))
     }
 
-        /// Surface prise en charge, ou `None` si son type n'est pas géré (la face est alors ignorée).
+    /// Surface prise en charge, ou `None` si son type n'est pas géré (la face est alors ignorée).
     fn surface(&self, id: EntityId) -> Result<Option<Surface>, ParseError> {
         let file: &'a StepFile = self.file;
         let entity = file
@@ -351,7 +438,7 @@ impl<'a> Builder<'a> {
             knots_v,
         }))
     }
-    
+
     fn vertex(&mut self, id: EntityId) -> Result<VertexId, ParseError> {
         if let Some(&known) = self.vertex_ids.get(&id) {
             return Ok(known);
@@ -441,6 +528,7 @@ impl<'a> Builder<'a> {
             outer_loop,
             inner_loops,
             same_sense,
+            color: self.colors.get(&id).copied(),
         }))
     }
 
@@ -460,13 +548,14 @@ impl<'a> Builder<'a> {
 ///
 /// Retourne aussi le nombre de faces ignorées parce que leur surface n'est pas prise en charge.
 pub(crate) fn build_solids(file: &StepFile) -> Result<(Vec<Solid>, usize), ParseError> {
+    let colors = collect_colors(file);
     let mut solids = Vec::new();
     let mut skipped = 0;
     for (&id, entity) in &file.entities {
         if entity.name() != "MANIFOLD_SOLID_BREP" {
             continue;
         }
-        let mut builder = Builder::new(file);
+        let mut builder = Builder::new(file, &colors);
         let args = builder.args(id, "MANIFOLD_SOLID_BREP")?;
         let shell = builder.shell(args.reference(1)?)?;
         skipped += builder.skipped_faces;
@@ -474,6 +563,7 @@ pub(crate) fn build_solids(file: &StepFile) -> Result<(Vec<Solid>, usize), Parse
             vertices: builder.vertices,
             edges: builder.edges,
             shells: vec![shell],
+            color: colors.get(&id).copied(),
         });
     }
     Ok((solids, skipped))
@@ -511,6 +601,19 @@ mod tests {
 
     fn file(body: &str) -> String {
         format!("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n{body}ENDSEC;\nEND-ISO-10303-21;\n")
+    }
+
+    fn style_chain(item: u32) -> String {
+        format!(
+            "#24=COLOUR_RGB('',0.25,0.5,1.);\n\
+             #25=FILL_AREA_STYLE_COLOUR('',#24);\n\
+             #26=FILL_AREA_STYLE('',(#25));\n\
+             #27=SURFACE_STYLE_FILL_AREA(#26);\n\
+             #28=SURFACE_SIDE_STYLE('',(#27));\n\
+             #29=SURFACE_STYLE_USAGE(.BOTH.,#28);\n\
+             #30=PRESENTATION_STYLE_ASSIGNMENT((#29));\n\
+             #31=STYLED_ITEM('',(#30),#{item});\n"
+        )
     }
 
     #[test]
@@ -555,5 +658,24 @@ mod tests {
             }
             other => panic!("courbe inattendue : {other:?}"),
         }
+    }
+
+    #[test]
+    fn reads_solid_color() {
+        let body = format!("{}{}", TRIANGLE, style_chain(23));
+        let model = parse_step(&file(&body)).unwrap();
+        assert_eq!(model.solids[0].color, Some([0.25, 0.5, 1.0]));
+        assert_eq!(model.solids[0].faces().next().unwrap().color, None);
+    }
+
+    #[test]
+    fn reads_face_color() {
+        let body = format!("{}{}", TRIANGLE, style_chain(21));
+        let model = parse_step(&file(&body)).unwrap();
+        assert_eq!(model.solids[0].color, None);
+        assert_eq!(
+            model.solids[0].faces().next().unwrap().color,
+            Some([0.25, 0.5, 1.0])
+        );
     }
 }

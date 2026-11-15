@@ -1,12 +1,13 @@
 //! [`AssetLoader`] Bevy pour les fichiers STEP.
 //!
 //! Le maillage est converti en mètres et en axes Bevy (Y vers le haut).
+//! Les couleurs du fichier deviennent des couleurs de sommets.
 
 use bevy::asset::{AssetLoader, LoadContext, RenderAssetUsages, io::Reader};
 use bevy::reflect::TypePath;
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use std::fmt;
-use step_link::mesh::{MeshData, tessellate};
+use step_link::mesh::{DEFAULT_COLOR, MeshData, tessellate};
 use step_link::parser::{ParseError, parse_step};
 
 /// Erreurs de chargement d'un fichier STEP.
@@ -85,9 +86,10 @@ impl AssetLoader for StepLoader {
 
         // Unités du fichier vers mètres, puis Z vers le haut (STEP) vers Y vers le haut (Bevy).
         let scale = model.unit_scale as f32;
+        let parts: Vec<MeshData> = model.solids.iter().map(tessellate).collect();
+        let colored = parts.iter().any(|p| !p.colors.is_empty());
         let mut data = MeshData::default();
-        for solid in &model.solids {
-            let part = tessellate(solid);
+        for part in &parts {
             let offset = data.positions.len() as u32;
             data.positions.extend(
                 part.positions
@@ -97,6 +99,14 @@ impl AssetLoader for StepLoader {
             data.normals
                 .extend(part.normals.iter().map(|&[x, y, z]| [x, z, -y]));
             data.indices.extend(part.indices.iter().map(|i| i + offset));
+            if colored {
+                if part.colors.is_empty() {
+                    data.colors
+                        .extend(std::iter::repeat_n(DEFAULT_COLOR, part.positions.len()));
+                } else {
+                    data.colors.extend_from_slice(&part.colors);
+                }
+            }
         }
         Ok(to_bevy_mesh(data))
     }
@@ -106,13 +116,31 @@ impl AssetLoader for StepLoader {
     }
 }
 
-/// Convertit un [`MeshData`] en [`Mesh`] Bevy.
+/// Convertit un [`MeshData`] en [`Mesh`] Bevy ; les couleurs sRGB deviennent des couleurs de sommets linéaires.
 fn to_bevy_mesh(data: MeshData) -> Mesh {
-    Mesh::new(
+    let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     )
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
-    .with_inserted_indices(Indices::U32(data.indices))
+    .with_inserted_indices(Indices::U32(data.indices));
+
+    if !data.colors.is_empty() {
+        let colors: Vec<[f32; 4]> = data
+            .colors
+            .iter()
+            .map(|&[r, g, b]| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0])
+            .collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    }
+    mesh
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
