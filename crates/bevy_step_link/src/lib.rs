@@ -1,7 +1,7 @@
 //! # bevy_step_link
 //!
-//! Intégration [Bevy](https://bevyengine.org) de [`step_link`] : charge les fichiers
-//! `.step` / `.stp` comme des [`Mesh`](bevy::render::mesh::Mesh) via l'`AssetServer`.
+//! [Bevy](https://bevyengine.org) integration for [`step_link`]: load `.step` / `.stp`
+//! files as [`Mesh`](bevy::render::mesh::Mesh) assets through the `AssetServer`.
 //!
 //! ```no_run
 //! use bevy::prelude::*;
@@ -22,9 +22,9 @@ pub use loader::{StepLoader, StepLoaderError};
 use bevy::app::{App, Plugin};
 use bevy::asset::AssetApp;
 
-/// Plugin Bevy enregistrant le [`StepLoader`] pour les extensions `step` et `stp`.
+/// Bevy plugin that registers [`StepLoader`] for the `step` and `stp` extensions.
 ///
-/// Après l'ajout du plugin, `asset_server.load::<Mesh>("piece.step")` fonctionne.
+/// After adding the plugin, `asset_server.load::<Mesh>("piece.step")` can be used.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StepLinkPlugin;
 

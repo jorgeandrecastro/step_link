@@ -1,4 +1,4 @@
-//! Conversion du graphe d'entités STEP en [`Solid`] B-Rep.
+//! Conversion of a STEP entity graph into a B-Rep [`Solid`].
 
 use crate::brep::{
     BSplineCurve, BSplineSurface, Color, Curve, Edge, EdgeId, Face, Frame, Loop, OrientedEdge,
@@ -14,7 +14,7 @@ fn invalid(entity: EntityId, message: impl Into<String>) -> ParseError {
     }
 }
 
-/// Accès typé aux paramètres d'un enregistrement.
+/// Typed access to a record's parameters.
 #[derive(Clone, Copy)]
 struct Args<'a> {
     id: EntityId,
@@ -88,7 +88,7 @@ fn vec3(args: &Args, index: usize) -> Result<Point3, ParseError> {
     }
 }
 
-/// Vecteur de nœuds développé (chaque nœud répété selon sa multiplicité).
+/// Expanded knot vector (each knot is repeated according to its multiplicity).
 fn expand_knots(args: &Args, mults_at: usize, knots_at: usize) -> Result<Vec<f64>, ParseError> {
     let multiplicities = args
         .list(mults_at)?
@@ -119,7 +119,7 @@ fn refs_param(rec: &Record, index: usize) -> Vec<EntityId> {
         .unwrap_or_default()
 }
 
-/// Couleur de remplissage d'un `PRESENTATION_STYLE_ASSIGNMENT`.
+/// Fill color of a `PRESENTATION_STYLE_ASSIGNMENT`.
 fn style_color(file: &StepFile, style: EntityId) -> Option<Color> {
     let assignment = find_record(file, style, "PRESENTATION_STYLE_ASSIGNMENT")?;
     for usage_id in refs_param(assignment, 0) {
@@ -165,7 +165,7 @@ fn style_color(file: &StepFile, style: EntityId) -> Option<Color> {
     None
 }
 
-/// Couleurs déclarées par les `STYLED_ITEM`, indexées par l'entité colorée (solide ou face).
+/// Colors declared by `STYLED_ITEM`, indexed by the colored entity (solid or face).
 fn collect_colors(file: &StepFile) -> HashMap<EntityId, Color> {
     let mut colors = HashMap::new();
     for entity in file.entities.values() {
@@ -275,7 +275,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// B-spline à nœuds, simple ou rationnelle (entité complexe).
+    /// B-spline with knots, simple or rational (complex entity).
     fn bspline_curve(&self, id: EntityId, entity: &Entity) -> Result<Curve, ParseError> {
         let (base, base_at, knots_args, knots_at) = if entity.is_complex() {
             (
@@ -320,7 +320,7 @@ impl<'a> Builder<'a> {
         }))
     }
 
-    /// Surface prise en charge, ou `None` si son type n'est pas géré (la face est alors ignorée).
+    /// Supported surface, or `None` if its type is unsupported (the face is then skipped).
     fn surface(&self, id: EntityId) -> Result<Option<Surface>, ParseError> {
         let file: &'a StepFile = self.file;
         let entity = file
@@ -371,7 +371,7 @@ impl<'a> Builder<'a> {
         }))
     }
 
-    /// Surface B-spline à nœuds, simple ou rationnelle (entité complexe).
+    /// B-spline surface with knots, simple or rational (complex entity).
     fn bspline_surface(&self, id: EntityId, entity: &Entity) -> Result<Surface, ParseError> {
         let (base, base_at, knots_args, knots_at) = if entity.is_complex() {
             (
@@ -489,7 +489,7 @@ impl<'a> Builder<'a> {
         Ok(Loop { edges })
     }
 
-    /// Construit une face, ou `None` (et la compte comme ignorée) si sa surface n'est pas gérée.
+    /// Builds a face, or returns `None` (and counts it as skipped) if its surface is unsupported.
     fn face(&mut self, id: EntityId) -> Result<Option<Face>, ParseError> {
         let file: &'a StepFile = self.file;
         let args = self.args(id, "ADVANCED_FACE")?;
@@ -519,7 +519,7 @@ impl<'a> Builder<'a> {
             return Err(args.invalid("face sans contour"));
         }
 
-        // Sans FACE_OUTER_BOUND déclaré, le premier contour est supposé externe.
+        // If no FACE_OUTER_BOUND is declared, the first loop is assumed to be the outer loop.
         let outer_index = bounds.iter().position(|(outer, _)| *outer).unwrap_or(0);
         let (_, outer_loop) = bounds.remove(outer_index);
         let inner_loops = bounds.into_iter().map(|(_, l)| l).collect();
@@ -544,9 +544,9 @@ impl<'a> Builder<'a> {
     }
 }
 
-/// Reconstruit un [`Solid`] par `MANIFOLD_SOLID_BREP` présent dans le fichier.
+/// Reconstructs one [`Solid`] for each `MANIFOLD_SOLID_BREP` in the file.
 ///
-/// Retourne aussi le nombre de faces ignorées parce que leur surface n'est pas prise en charge.
+/// Also returns the number of faces skipped because their surface is unsupported.
 pub(crate) fn build_solids(file: &StepFile) -> Result<(Vec<Solid>, usize), ParseError> {
     let colors = collect_colors(file);
     let mut solids = Vec::new();

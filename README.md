@@ -3,30 +3,30 @@
 [![Crates.io](https://img.shields.io/crates/v/step_link.svg)](https://crates.io/crates/step_link)
 [![docs.rs](https://docs.rs/step_link/badge.svg)](https://docs.rs/step_link)
 [![Downloads](https://img.shields.io/crates/d/step_link.svg)](https://crates.io/crates/step_link)
-[![License](https://img.shields.io/crates/l/step_link.svg)](#licence)
+[![License](https://img.shields.io/crates/l/step_link.svg)](#license)
 [![CI](https://github.com/jorgeandrecastro/step_link/actions/workflows/ci.yml/badge.svg)](https://github.com/jorgeandrecastro/step_link/actions)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
-Moteur géométrique **B-Rep** et parser **STEP (ISO 10303-21)** en pur Rust, pensé pour être utilisé notamment avec [Bevy](https://bevyengine.org).
+Pure Rust **B-Rep** geometric engine and **STEP (ISO 10303-21)** parser, designed for seamless integration with [Bevy](https://bevyengine.org).
 
-![3DBenchy chargé depuis un fichier STEP et rendu dans Bevy](https://raw.githubusercontent.com/jorgeandrecastro/step_link/main/images/image2.png)
+![3DBenchy loaded from a STEP file and rendered in Bevy](https://raw.githubusercontent.com/jorgeandrecastro/step_link/main/images/image2.png)
 
-*Modèle `3DBenchy.step` rendu dans Bevy.*
+*`3DBenchy.step` model rendered in Bevy.*
 
 ## Vision
 
-Importer des pièces CAO (`.step` / `.stp`) directement dans un moteur de jeu ou un viewer, sans passer par une conversion externe en STL/OBJ, et en conservant la topologie B-Rep (solides, coques, faces, arêtes, sommets) pour des usages futurs : mesure, sélection de faces, retessellation à la volée.
+Import CAD parts (`.step` / `.stp`) directly into a game engine or viewer without going through an external STL/OBJ conversion, preserving the B-Rep topology (solids, shells, faces, edges, vertices) for future use cases: measurement, face selection, and on-the-fly retessellation.
 
-Le format natif de Fusion 360 (`.f3d`) n'est pas lisible : dans Fusion, exporter via *Fichier → Exporter → STEP*.
+Fusion 360's native format (`.f3d`) is not supported: in Fusion, export via *File → Export → STEP*.
 
-Le projet est découpé en deux crates :
+The project is split into two crates:
 
-| Crate | Rôle |
+| Crate | Role |
 |---|---|
-| [`step_link`](https://crates.io/crates/step_link) | Cœur pur Rust : topologie B-Rep, parser STEP, tessellation. **Aucune dépendance Bevy.** |
-| [`bevy_step_link`](https://crates.io/crates/bevy_step_link) | `StepLinkPlugin` + `AssetLoader` Bevy : `.step` / `.stp` → `Mesh`. |
+| [`step_link`](https://crates.io/crates/step_link) | Pure Rust core: B-Rep topology, STEP parser, tessellation. **Zero Bevy dependencies.** |
+| [`bevy_step_link`](https://crates.io/crates/bevy_step_link) | `StepLinkPlugin` + Bevy `AssetLoader`: `.step` / `.stp` → `Mesh`. |
 
-## Arborescence du projet
+## Project Tree
 
 ```text
 step_link/
@@ -34,21 +34,21 @@ step_link/
 ├── Cargo.lock
 ├── CHANGELOG.md
 ├── crates/
-│   ├── step_link/                 # Cœur pur Rust
+│   ├── step_link/                 # Pure Rust core
 │   │   ├── examples/
 │   │   │   └── inspect.rs
 │   │   └── src/
-│   │       ├── brep.rs            # Modèle topologique B-Rep
-│   │       ├── builder.rs         # Reconstruction depuis les entités STEP
+│   │       ├── brep.rs            # B-Rep topological model
+│   │       ├── builder.rs         # Reconstruction from STEP entities
 │   │       ├── lib.rs
 │   │       ├── mesh/
-│   │       │   ├── mod.rs         # Tessellation et type MeshData
-│   │       │   ├── chart.rs       # Projection des surfaces dans l'espace UV
-│   │       │   ├── edges.rs       # Discrétisation et cache des arêtes
-│   │       │   ├── spline.rs      # Évaluation des courbes et surfaces B-spline
-│   │       │   └── triangulate.rs # Delaunay contraint (spade) + ear clipping de repli
-│   │       └── parser.rs          # Parser Part 21
-│   └── bevy_step_link/            # Intégration Bevy
+│   │       │   ├── mod.rs         # Tessellation and MeshData type
+│   │       │   ├── chart.rs       # Surface projection into UV space
+│   │       │   ├── edges.rs       # Edge discretization and caching
+│   │       │   ├── spline.rs      # B-spline curve and surface evaluation
+│   │       │   └── triangulate.rs # Constrained Delaunay (spade) + ear clipping fallback
+│   │       └── parser.rs          # Part 21 parser
+│   └── bevy_step_link/            # Bevy integration
 │       ├── assets/
 │       │   └── models/
 │       │       └── part.step
@@ -63,70 +63,70 @@ step_link/
 └── LICENSE-MIT
 ```
 
-## État d'avancement
+## Current Status
 
-- [x] Modèle B-Rep : `Solid` → `Shell` → `Face` (`Surface`, boucle externe et boucles internes) → `OrientedEdge` → `Edge` (`Curve`) → `Vertex`, arêtes partagées par index
-- [x] Tessellation : plans, cylindres, cônes, sphères, tores, surfaces B-spline, contours courbes et trous (Delaunay contraint via [`spade`](https://crates.io/crates/spade), *ear clipping* en repli)
-- [x] Points intérieurs et normales analytiques sur les sphères, tores et surfaces B-spline/NURBS (0.4)
-- [x] Couleurs STEP des solides et des faces (`STYLED_ITEM`) transférées au maillage et rendues dans Bevy (0.5)
-- [x] `AssetLoader` Bevy + plugin
-- [x] Parser Part 21 : en-tête, entités, paramètres typés, entités complexes, commentaires
-- [x] Reconstruction de la topologie à partir des entités STEP (plans, cylindres, cônes, sphères, tores ; droites, cercles, ellipses, B-splines)
-- [x] Validé sur un export réel (`WallHook_30mm.stp`) : affichage correct dans Bevy
+- [x] B-Rep model: `Solid` → `Shell` → `Face` (`Surface`, outer loop and inner loops) → `OrientedEdge` → `Edge` (`Curve`) → `Vertex`, index-shared edges
+- [x] Tessellation: planes, cylinders, cones, spheres, tori, B-spline surfaces, curved contours and holes (constrained Delaunay via [`spade`](https://crates.io/crates/spade), *ear clipping* fallback)
+- [x] Interior points and analytical normals on spheres, tori, and B-spline/NURBS surfaces (0.4)
+- [x] Solid and face STEP colors (`STYLED_ITEM`) transferred to the mesh and rendered in Bevy (0.5)
+- [x] Bevy `AssetLoader` + plugin
+- [x] Part 21 parser: header, entities, typed parameters, complex entities, comments
+- [x] Topology reconstruction from STEP entities (planes, cylinders, cones, spheres, tori; lines, circles, ellipses, B-splines)
+- [x] Validated on a real-world export (`WallHook_30mm.stp`): displays accurately in Bevy
 
-> Depuis la 0.4, les faces courbes (sphères, tores, B-splines/NURBS) reçoivent des points intérieurs dont la densité suit la tolérance : elles ne sont plus facettées. Cylindres et cônes (surfaces réglées) restent triangulés par leurs contours.
+> Since 0.4, curved faces (spheres, tori, B-splines/NURBS) receive interior points whose density follows the tolerance: they are no longer faceted. Cylinders and cones (ruled surfaces) remain triangulated by their contours.
 
-Depuis la 0.5, les couleurs STEP des solides et des faces sont conservées dans le maillage. Une couleur de face est prioritaire sur celle du solide ; les faces sans couleur reçoivent une teinte neutre lorsqu’un maillage contient des couleurs.
+Since 0.5, solid and face STEP colors are preserved in the mesh. A face color overrides the solid color; faces without a color receive a neutral tint when a mesh contains colors.
 
 ## Roadmap
 
-### 1. Parser Part 21 générique ✅
-Lexer et graphe `#id → entité` (`parse_part21`). Paramètres : références, entiers, réels, chaînes, énumérations, listes, valeurs typées, `$` et `*`. Entités complexes `#5 = (A() B())`.
+### 1. Generic Part 21 Parser ✅
+Lexer and `#id → entity` graph (`parse_part21`). Parameters: references, integers, reals, strings, enumerations, lists, typed values, `$` and `*`. Complex entities `#5 = (A() B())`.
 
-- [ ] Décoder les séquences d'échappement des chaînes (`\X\`, `\X2\`)
-- [x] Test sur un vrai export (`WallHook_30mm.stp`)
-- [ ] Tests sur d'autres exports (Fusion 360, FreeCAD, SolidWorks)
-- [ ] Fuzzing du lexer (`cargo fuzz`), aucune panique sur fichier malformé
+- [ ] Decode string escape sequences (`\X\`, `\X2\`)
+- [x] Tested on a real export (`WallHook_30mm.stp`)
+- [ ] Tests on other exports (Fusion 360, FreeCAD, SolidWorks)
+- [ ] Lexer fuzzing (`cargo fuzz`), zero panics on malformed files
 
-### 2. Modèle B-Rep complet ✅
-`Face { surface, outer_loop, inner_loops, same_sense }`, `Surface` (plan, cylindre, cône, sphère, tore, B-spline), `Curve` (droite, cercle, ellipse, B-spline), arêtes partagées par index.
+### 2. Full B-Rep Model ✅
+`Face { surface, outer_loop, inner_loops, same_sense }`, `Surface` (plane, cylinder, cone, sphere, torus, B-spline), `Curve` (line, circle, ellipse, B-spline), index-shared edges.
 
-### 3. Entités STEP vers topologie ✅
-Chaîne `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND → EDGE_LOOP → ORIENTED_EDGE → EDGE_CURVE → VERTEX_POINT → CARTESIAN_POINT`, surfaces (plan, cylindre, cône, sphère, tore) et courbes (droite, cercle, ellipse, B-spline). Validé sur un export réel de 63 faces.
+### 3. STEP Entities to Topology ✅
+Chain `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND → EDGE_LOOP → ORIENTED_EDGE → EDGE_CURVE → VERTEX_POINT → CARTESIAN_POINT`, surfaces (plane, cylinder, cone, sphere, torus) and curves (line, circle, ellipse, B-spline). Validated on a real 63-face export.
 
 - [ ] `BREP_WITH_VOIDS`
-- [x] Courbes B-splines rationnelles (entités complexes)
-- [x] Surfaces B-spline et NURBS (lecture, rationnelles comprises)
+- [x] Rational B-spline curves (complex entities)
+- [x] B-spline and NURBS surfaces (parsing, including rational ones)
 - [ ] `SURFACE_CURVE`
-- [x] Les faces à surface non prise en charge sont ignorées avec un avertissement, au lieu de faire échouer le fichier
-- [ ] Contour externe : sans `FACE_OUTER_BOUND`, le premier contour est supposé externe
-- [ ] Unités non SI (pouces, `CONVERSION_BASED_UNIT`)
+- [x] Faces with unsupported surfaces are skipped with a warning rather than failing the entire file
+- [ ] Outer boundary: without `FACE_OUTER_BOUND`, assume the first loop is outer
+- [ ] Non-SI units (inches, `CONVERSION_BASED_UNIT`)
 
-### 4. Tessellation (en cours)
-- [x] Plans : Delaunay contraint avec trous
-- [x] Cylindres et cônes : triangulation dans l'espace paramétrique (angle, hauteur)
-- [x] Sphères et tores
-- [x] Discrétisation des arêtes partagée entre faces voisines
-- [x] Tolérance (flèche maximale) configurable (`tessellate_with_tolerance`)
-- [x] Surfaces B-spline/NURBS : projection des contours en (u, v)
-- [x] Surfaces B-spline/NURBS, sphères et tores : points intérieurs
-- [x] Subdivision intérieure des faces courbes (grille en nid d'abeille dans l'espace UV)
-- [x] Repli sur l'*ear clipping* si les contours sont pathologiques
-- [ ] Points intérieurs pour cylindres et cônes (rails angulaires) si des facettes restent visibles
-- [ ] Soudure des sommets entre faces
-- [ ] Vérifier le fond des trous coniques (artefact visible sur `WallHook_30mm`)
+### 4. Tessellation (in progress)
+- [x] Planes: constrained Delaunay with holes
+- [x] Cylinders and cones: triangulation in parametric space (angle, height)
+- [x] Spheres and tori
+- [x] Shared edge discretization between adjacent faces
+- [x] Configurable tolerance (max sag) (`tessellate_with_tolerance`)
+- [x] B-spline/NURBS surfaces: contour projection into (u, v)
+- [x] B-spline/NURBS surfaces, spheres, and tori: interior points
+- [x] Interior subdivision of curved faces (honeycomb grid in UV space)
+- [x] Fallback to *ear clipping* on pathological contours
+- [ ] Interior points for cylinders and cones (angular rails) if faceting remains visible
+- [ ] Vertex welding across faces
+- [ ] Check the bottom of conical holes (artifact visible on `WallHook_30mm`)
 
-### 5. Intégration Bevy
-- [x] Pavé de remplacement supprimé : un fichier sans solide est une erreur de chargement
-- [x] Conversion d'unités et d'axes (mm / Z-up vers m / Y-up) faite par le loader
-- [ ] Plusieurs solides et assemblages (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`, transformations)
-- [ ] Réglages du loader (tolérance, échelle) via `type Settings`
-- [x] Couleurs (`STYLED_ITEM`) des solides et des faces, rendues comme couleurs de sommets
+### 5. Bevy Integration
+- [x] Fallback box removed: a file with no solids returns a load error
+- [x] Unit and axis conversion (mm / Z-up to m / Y-up) handled by the loader
+- [ ] Multiple solids and assemblies (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`, transforms)
+- [ ] Loader settings (tolerance, scale) via `type Settings`
+- [x] Solid and face colors (`STYLED_ITEM`), rendered as vertex colors
 
-### 6. Robustesse et publication
-- [ ] Corpus de pièces de complexité croissante : cube, cylindre percé, pièce avec congés
-- [ ] Documentation et exemples complets
-- [x] Publication sur crates.io
+### 6. Robustness & Publishing
+- [ ] Corpus of parts with increasing complexity: cube, drilled cylinder, filleted part
+- [ ] Comprehensive documentation and examples
+- [x] Published on crates.io
 
 ## Installation
 
@@ -136,16 +136,16 @@ bevy = "0.20"
 bevy_step_link = "0.5"
 ```
 
-Pour utiliser uniquement le cœur, sans Bevy :
+To use only the core library without Bevy:
 
 ```toml
 [dependencies]
 step_link = "0.5"
 ```
 
-## Exemple (Bevy)
+## Example (Bevy)
 
-Placez votre fichier dans `assets/models/part.step`.
+Place your file at `assets/models/part.step`.
 
 ```rust
 use bevy::prelude::*;
@@ -163,18 +163,18 @@ fn setup(
     assets: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Le .step est chargé directement comme un Mesh.
+    // The .step file is loaded directly as a Mesh.
     let mesh: Handle<Mesh> = assets.load("models/part.step");
 
-    // Le loader convertit en mètres et en Y-up : une pièce de 40 mm fait 0.04 unité.
-    // On l'agrandit ici pour la voir avec la caméra ci-dessous.
+    // The loader converts units to meters and axes to Y-up: a 40 mm part equals 0.04 units.
+    // Scaling it up here to make it visible with the camera below.
     commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         Transform::from_scale(Vec3::splat(50.0)),
     ));
 
-    // Sans caméra, Bevy n'affiche que le fond gris.
+    // Without a camera, Bevy only renders a gray background.
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-3.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -184,13 +184,13 @@ fn setup(
 }
 ```
 
-Exemple complet avec caméra orbitale (clic gauche + glisser pour tourner, molette pour zoomer) :
+Full example with orbit camera (left click + drag to orbit, scroll wheel to zoom):
 
 ```sh
 cargo run -p bevy_step_link --example load_step
 ```
 
-## Exemple (pur Rust)
+## Example (Pure Rust)
 
 ```rust
 use step_link::{brep::Solid, mesh::tessellate};
@@ -199,50 +199,50 @@ let mesh = tessellate(&Solid::cuboid(1.0, 1.0, 1.0));
 println!("{} triangles", mesh.triangle_count());
 ```
 
-Lecture d'un fichier STEP :
+Reading a STEP file:
 
 ```rust
 use step_link::parser::parse_part21;
 
-let file = parse_part21(&std::fs::read_to_string("piece.step").unwrap()).unwrap();
-println!("{} entités", file.entities.len());
+let file = parse_part21(&std::fs::read_to_string("part.step").unwrap()).unwrap();
+println!("{} entities", file.entities.len());
 ```
 
-Inspection d'un fichier (comptage des entités, statistiques du solide) :
+Inspecting a file (entity count, solid statistics):
 
 ```sh
-cargo run -p step_link --example inspect -- piece.step
+cargo run -p bevy_step_link --example inspect -- part.step
 ```
 
-Cette commande accepte un chemin `.step` ou `.stp`. Elle affiche les entités STEP, les solides reconstruits, les faces ignorées et le nombre de triangles ; les erreurs de lecture, de parsing ou de reconstruction sont affichées dans le terminal.
+This command accepts a `.step` or `.stp` path. It outputs STEP entities, reconstructed solids, skipped faces, and triangle counts; read, parse, or reconstruction errors are printed to the terminal.
 
-Pour vérifier visuellement une nouvelle pièce avec Bevy, placez-la dans `crates/bevy_step_link/assets/models/part.step` (ou adaptez le chemin `models/part.step` dans `crates/bevy_step_link/examples/load_step.rs`), puis lancez :
+To visually inspect a new part in Bevy, place it at `crates/bevy_step_link/assets/models/part.step` (or update the `models/part.step` path in `crates/bevy_step_link/examples/load_step.rs`), then run:
 
 ```sh
 cargo run -p bevy_step_link --example load_step
 ```
 
-Le chargeur convertit les unités en mètres et les axes en Y-up. `cargo test --workspace` lance les tests automatisés du projet ; cette commande ne charge pas automatiquement un fichier STEP arbitraire.
+The loader converts units to meters and axes to Y-up. `cargo test --workspace` runs the project's automated test suite; this command does not automatically load an arbitrary STEP file.
 
-## Développement
+## Development
 
 ```sh
 cargo check --workspace
 cargo test --workspace
 ```
 
-## Contribuer
+## Contributing
 
-Les issues et pull requests sont les bienvenues sur [GitHub](https://github.com/jorgeandrecastro/step_link/issues).
-Si une pièce STEP ne se charge pas correctement, joignez le fichier (ou un extrait) à l'issue : les cas réels sont précieux pour faire avancer le parser et le tessellateur.
+Issues and pull requests are welcome on [GitHub](https://github.com/jorgeandrecastro/step_link/issues).
+If a STEP part fails to load properly, please attach the file (or an excerpt) to the issue: real-world test cases are invaluable for improving the parser and tessellator.
 
-## Auteur
+## Author
 
 **Jorge Andre Castro** : [@jorgeandrecastro](https://github.com/jorgeandrecastro)
 
-## Licence
+## License
 
-Distribué sous double licence, à votre choix :
+Dual-licensed under either of the following, at your option:
 
 - [Apache License, Version 2.0](https://github.com/jorgeandrecastro/step_link/blob/main/LICENSE-APACHE)
 - [MIT license](https://github.com/jorgeandrecastro/step_link/blob/main/LICENSE-MIT)

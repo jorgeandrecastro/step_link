@@ -1,15 +1,15 @@
 //! # step_link
 //!
-//! Moteur géométrique B-Rep, parser STEP (ISO 10303-21) et tessellation en pur Rust.
+//! Pure Rust B-Rep geometry engine, STEP (ISO 10303-21) parser, and tessellator.
 //!
-//! Cette crate n'a **aucune dépendance** vers Bevy ni vers un moteur de rendu :
-//! elle peut être utilisée dans n'importe quel contexte (outils CLI, viewers, moteurs de jeu).
+//! This crate has **no dependencies** on Bevy or any rendering engine:
+//! it can be used in any context (CLI tools, viewers, game engines).
 //!
-//! Pipeline typique :
+//! Typical pipeline:
 //!
-//! 1. [`parser::parse_step`] lit un fichier STEP et produit un [`brep::Solid`] ;
-//! 2. [`mesh::tessellate`] convertit le solide en [`mesh::MeshData`] (triangles) ;
-//! 3. le résultat est consommé par l'application hôte (ex. `bevy_step_link`).
+//! 1. [`parser::parse_step`] reads a STEP file and produces a [`brep::Solid`].
+//! 2. [`mesh::tessellate`] converts the solid into [`mesh::MeshData`] (triangles).
+//! 3. The host application consumes the result (e.g. `bevy_step_link`).
 //!
 //! ```
 //! use step_link::{brep::Solid, mesh::tessellate};

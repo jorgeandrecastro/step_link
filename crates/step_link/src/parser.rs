@@ -1,41 +1,41 @@
 //! Parser STEP (ISO 10303-21, « Part 21 »).
 //!
-//! Lexer et graphe d'entités : le fichier est lu en un [`StepFile`] (en-tête +
-//! entités indexées par `#id`) avec des paramètres typés ([`Param`]).
-//! [`parse_step`] reconstruit ensuite les solides B-Rep à partir de ce graphe.
+//! Lexer and entity graph: the file is read into a [`StepFile`] (header +
+//! entities indexed by `#id`) with typed parameters ([`Param`]).
+//! [`parse_step`] then reconstructs B-Rep solids from this graph.
 //!
-//! Limites connues : les séquences d'échappement des chaînes (`\X\`, `\X2\`, …)
-//! ne sont pas décodées, et seules les sections `HEADER` et `DATA` sont lues.
+//! Known limitations: string escape sequences (`\X\`, `\X2\`, …) are not decoded,
+//! and only the `HEADER` and `DATA` sections are read.
 
 use crate::brep::Solid;
 use crate::builder::build_solids;
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// Identifiant d'entité STEP (le `42` de `#42`).
+/// STEP entity identifier (the `42` in `#42`).
 pub type EntityId = u64;
 
-/// Erreurs possibles lors de la lecture d'un fichier STEP.
+/// Errors that can occur while reading a STEP file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    /// Le fichier ne commence pas par `ISO-10303-21;`.
+    /// The file does not start with `ISO-10303-21;`.
     MissingHeader,
-    /// Aucune section `DATA;` n'a été trouvée.
+    /// No `DATA;` section was found.
     MissingDataSection,
-    /// Le fichier se termine sans `END-ISO-10303-21;`.
+    /// The file ends without `END-ISO-10303-21;`.
     MissingFooter,
-    /// Erreur de syntaxe à une ligne donnée.
+    /// A syntax error occurred on a given line.
     Syntax {
-        /// Numéro de ligne (à partir de 1).
+        /// Line number (starting at 1).
         line: usize,
         /// Description de l'erreur.
         message: String,
     },
-    /// Entité STEP invalide ou non prise en charge.
+    /// The STEP entity is invalid or unsupported.
     Invalid {
-        /// Identifiant de l'entité en cause.
+        /// Identifier of the entity involved.
         entity: EntityId,
-        /// Description du problème.
+        /// Description of the problem.
         message: String,
     },
 }
@@ -54,33 +54,33 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Paramètre d'une entité STEP.
+/// Parameter of a STEP entity.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Param {
-    /// Référence vers une autre entité (`#12`).
+    /// Reference to another entity (`#12`).
     Ref(EntityId),
     /// Entier (`3`).
     Int(i64),
-    /// Réel (`1.5`, `1.E-3`).
+    /// Real number (`1.5`, `1.E-3`).
     Real(f64),
-    /// Chaîne (`'texte'`), apostrophes doublées déjà résolues.
+    /// String (`'text'`), with doubled apostrophes already resolved.
     Str(String),
-    /// Énumération ou booléen, sans les points, en majuscules (`.T.` → `T`).
+    /// Enumeration or boolean, uppercase and without the periods (`.T.` → `T`).
     Enum(String),
-    /// Donnée binaire (`"0A1F"`), contenu hexadécimal brut.
+    /// Binary data (`"0A1F"`), raw hexadecimal content.
     Binary(String),
-    /// Liste de paramètres (`(1.,2.,3.)`).
+    /// List of parameters (`(1.,2.,3.)`).
     List(Vec<Param>),
-    /// Valeur typée (`LENGTH_MEASURE(10.)`).
+    /// Typed value (`LENGTH_MEASURE(10.)`).
     Typed(String, Vec<Param>),
-    /// Valeur non renseignée (`$`).
+    /// Unspecified value (`$`).
     Omitted,
-    /// Valeur dérivée (`*`).
+    /// Derived value (`*`).
     Derived,
 }
 
 impl Param {
-    /// Retourne l'identifiant référencé s'il s'agit d'un [`Param::Ref`].
+    /// Returns the referenced identifier if this is a [`Param::Ref`].
     pub fn as_id(&self) -> Option<EntityId> {
         match self {
             Self::Ref(id) => Some(*id),
@@ -88,7 +88,7 @@ impl Param {
         }
     }
 
-    /// Retourne la valeur numérique d'un [`Param::Real`] ou [`Param::Int`].
+    /// Returns the numeric value of a [`Param::Real`] or [`Param::Int`].
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Real(v) => Some(*v),
@@ -97,7 +97,7 @@ impl Param {
         }
     }
 
-    /// Retourne la chaîne d'un [`Param::Str`].
+    /// Returns the string value of a [`Param::Str`].
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::Str(s) => Some(s),
@@ -105,7 +105,7 @@ impl Param {
         }
     }
 
-    /// Retourne les éléments d'un [`Param::List`].
+    /// Returns the elements of a [`Param::List`].
     pub fn as_list(&self) -> Option<&[Param]> {
         match self {
             Self::List(items) => Some(items),
@@ -114,73 +114,73 @@ impl Param {
     }
 }
 
-/// Entité simple : un nom de type et ses paramètres (`CARTESIAN_POINT('',(0.,0.,0.))`).
+/// Simple entity: a type name and its parameters (`CARTESIAN_POINT('',(0.,0.,0.))`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
-    /// Nom du type, en majuscules.
+    /// Type name, in uppercase.
     pub name: String,
-    /// Paramètres, dans l'ordre.
+    /// Parameters, in order.
     pub params: Vec<Param>,
 }
 
-/// Entité du fichier : un enregistrement simple, ou plusieurs pour une entité complexe.
+/// File entity: one simple record, or multiple records for a complex entity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entity {
-    /// Enregistrements composant l'entité (jamais vide).
+    /// Records that make up the entity (never empty).
     pub records: Vec<Record>,
 }
 
 impl Entity {
-    /// Nom du premier enregistrement.
+    /// Name of the first record.
     pub fn name(&self) -> &str {
         self.records.first().map_or("", |r| r.name.as_str())
     }
 
-    /// Vrai si l'entité est complexe (`#5 = (A() B())`).
+    /// `true` if the entity is complex (`#5 = (A() B())`).
     pub fn is_complex(&self) -> bool {
         self.records.len() > 1
     }
 
-    /// Cherche l'enregistrement portant ce nom (en majuscules).
+    /// Finds the record with this name (case-insensitive).
     pub fn record(&self, name: &str) -> Option<&Record> {
         self.records.iter().find(|r| r.name == name)
     }
 }
 
-/// Contenu d'un fichier STEP après lecture.
+/// Contents of a STEP file after reading.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StepFile {
-    /// Enregistrements de la section `HEADER`.
+    /// Records in the `HEADER` section.
     pub header: Vec<Record>,
-    /// Entités de la section `DATA`, indexées par identifiant.
+    /// Entities in the `DATA` section, indexed by identifier.
     pub entities: BTreeMap<EntityId, Entity>,
 }
 
 impl StepFile {
-    /// Retourne l'entité portant cet identifiant.
+    /// Returns the entity with this identifier.
     pub fn get(&self, id: EntityId) -> Option<&Entity> {
         self.entities.get(&id)
     }
 }
 
-/// Résultat de l'analyse d'un fichier STEP.
+/// Result of parsing a STEP file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepModel {
-    /// Solides reconstruits, un par `MANIFOLD_SOLID_BREP`.
+    /// Reconstructed solids, one per `MANIFOLD_SOLID_BREP`.
     pub solids: Vec<Solid>,
-    /// Nombre d'entités de la section `DATA`.
+    /// Number of entities in the `DATA` section.
     pub entity_count: usize,
-    /// Mètres par unité de longueur du fichier (`0.001` pour un fichier en millimètres, `1.0` si inconnu).
+    /// Meters per file length unit (`0.001` for a file in millimeters, `1.0` if unknown).
     pub unit_scale: f64,
-    /// Faces ignorées parce que leur surface n'est pas prise en charge.
+    /// Faces skipped because their surface is unsupported.
     pub skipped_faces: usize,
 }
 
-/// Analyse un fichier STEP et reconstruit ses solides.
+/// Parses a STEP file and reconstructs its solids.
 ///
 /// # Erreurs
 ///
-/// Retourne une [`ParseError`] si le fichier est invalide.
+/// Returns a [`ParseError`] if the file is invalid.
 pub fn parse_step(input: &str) -> Result<StepModel, ParseError> {
     let file = parse_part21(input)?;
     let (solids, skipped_faces) = build_solids(&file)?;
@@ -192,7 +192,7 @@ pub fn parse_step(input: &str) -> Result<StepModel, ParseError> {
     })
 }
 
-/// Échelle de l'unité de longueur SI déclarée dans le fichier ; `1.0` sinon (unités non SI non gérées).
+/// Scale of the SI length unit declared in the file; `1.0` otherwise (non-SI units are unsupported).
 fn length_unit_scale(file: &StepFile) -> f64 {
     file.entities
         .values()
@@ -215,11 +215,11 @@ fn length_unit_scale(file: &StepFile) -> f64 {
         .unwrap_or(1.0)
 }
 
-/// Lit la structure Part 21 : en-tête et graphe d'entités, sans interpréter la géométrie.
+/// Reads the Part 21 structure: header and entity graph, without interpreting the geometry.
 ///
 /// # Erreurs
 ///
-/// Retourne une [`ParseError`] si la syntaxe est invalide.
+/// Returns a [`ParseError`] if the syntax is invalid.
 pub fn parse_part21(input: &str) -> Result<StepFile, ParseError> {
     let mut lexer = Lexer::new(input.trim_start_matches('\u{feff}'));
     if !lexer.eat_ident("ISO-10303-21") {
@@ -290,7 +290,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Saute les espaces et les commentaires `/* ... */`.
+    /// Skips whitespace and `/* ... */` comments.
     fn skip_trivia(&mut self) -> Result<(), ParseError> {
         loop {
             match self.peek() {
@@ -316,7 +316,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Lit un mot-clé en majuscules (`CARTESIAN_POINT`, `END-ISO-10303-21`, …).
+    /// Reads an uppercase keyword (`CARTESIAN_POINT`, `END-ISO-10303-21`, …).
     fn ident(&mut self) -> Result<String, ParseError> {
         self.skip_trivia()?;
         let start = self.pos;
@@ -330,7 +330,7 @@ impl<'a> Lexer<'a> {
         Ok(self.src[start..self.pos].to_ascii_uppercase())
     }
 
-    /// Consomme le mot-clé attendu, sinon ne bouge pas.
+    /// Consumes the expected keyword, or leaves the input unchanged.
     fn eat_ident(&mut self, expected: &str) -> bool {
         let saved = self.pos;
         match self.ident() {

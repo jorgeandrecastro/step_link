@@ -1,17 +1,17 @@
-//! Tessellation : conversion d'un [`Solid`] B-Rep en maillage triangulaire.
+//! Tessellation: conversion of a B-Rep [`Solid`] into a triangle mesh.
 //!
-//! Les arêtes sont discrétisées une fois et partagées entre faces voisines.
-//! Chaque face est ensuite projetée dans l'espace de sa surface puis triangulée par
-//! Delaunay contraint (`spade`) : les contours sont des arêtes contraintes, et les surfaces
-//! courbes (sphères, tores, B-splines) reçoivent des points intérieurs dont la densité dépend
-//! de la tolérance. En cas de contour pathologique, on retombe sur l'*ear clipping*.
-//! Plans, cylindres, cônes, sphères, tores et surfaces B-spline sont pris en charge.
+//! Edges are discretized once and shared between adjacent faces.
+//! Each face is then projected into its surface's parameter space and triangulated using
+//! constrained Delaunay (`spade`): contours are constrained edges, and curved surfaces
+//! (spheres, tori, B-splines) receive interior points with a density based on the tolerance.
+//! For pathological contours, the algorithm falls back to *ear clipping*.
+//! Planes, cylinders, cones, spheres, tori, and B-spline surfaces are supported.
 //!
-//! Organisation du module :
-//! - `edges` : discrétisation des arêtes et des boucles
-//! - `spline` : évaluation de Boor, courbes et surfaces B-spline
-//! - `chart` : projection d'une surface dans son espace paramétrique
-//! - `triangulate` : triangulation 2D avec trous et points intérieurs
+//! Module organization:
+//! - `edges`: discretization of edges and loops
+//! - `spline`: de Boor evaluation, B-spline curves and surfaces
+//! - `chart`: projection of a surface into its parameter space
+//! - `triangulate`: 2D triangulation with holes and interior points
 
 mod chart;
 mod edges;
@@ -24,41 +24,41 @@ use edges::{EdgeCache, loop_polyline};
 use std::f64::consts::TAU;
 use triangulate::{Triangulation, area, triangulate_refined};
 
-/// Flèche maximale par défaut, dans l'unité du modèle (millimètres pour la plupart des exports CAO).
+/// Default maximum sagitta, in model units (millimeters for most CAD exports).
 pub const DEFAULT_TOLERANCE: f64 = 0.05;
 
-/// Couleur des faces sans couleur propre dans un maillage où d'autres faces sont colorées.
+/// Color for faces without an assigned color in a mesh where other faces are colored.
 pub const DEFAULT_COLOR: [f32; 3] = [0.8, 0.8, 0.8];
 
-/// Maillage triangulaire indépendant de tout moteur de rendu.
+/// Triangle mesh independent of any rendering engine.
 ///
-/// Les sommets sont dupliqués par face afin que chaque face possède ses propres normales.
-/// Les sommets intérieurs des surfaces courbes ont des normales analytiques.
+/// Vertices are duplicated per face so that each face has its own normals.
+/// Interior vertices on curved surfaces have analytical normals.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MeshData {
-    /// Positions des sommets.
+    /// Vertex positions.
     pub positions: Vec<[f32; 3]>,
-    /// Normales par sommet (même longueur que `positions`).
+    /// Per-vertex normals (same length as `positions`).
     pub normals: Vec<[f32; 3]>,
-    /// Couleurs RGB (sRGB) par sommet. Vide si aucune face n'est colorée, sinon de même longueur que `positions`.
+    /// Per-vertex RGB colors (sRGB). Empty if no faces are colored; otherwise, the same length as `positions`.
     pub colors: Vec<[f32; 3]>,
     /// Indices de triangles (3 par triangle).
     pub indices: Vec<u32>,
 }
 
 impl MeshData {
-    /// Nombre de triangles du maillage.
+    /// Number of triangles in the mesh.
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
 }
 
-/// Tessellise un solide complet avec la tolérance par défaut.
+/// Tessellates an entire solid using the default tolerance.
 pub fn tessellate(solid: &Solid) -> MeshData {
     tessellate_with_tolerance(solid, DEFAULT_TOLERANCE)
 }
 
-/// Tessellise un solide ; `tolerance` est la flèche maximale tolérée sur les courbes.
+/// Tessellates a solid; `tolerance` is the maximum permitted curve sagitta.
 pub fn tessellate_with_tolerance(solid: &Solid, tolerance: f64) -> MeshData {
     let tolerance = tolerance.max(1e-6);
     let mut mesh = MeshData::default();
@@ -113,14 +113,14 @@ fn tessellate_face(
         })
         .collect();
 
-    // Le plus grand contour est le contour externe.
+    // The largest contour is the outer contour.
     let outer_index = (0..loops2d.len())
         .max_by(|&a, &b| area(&loops2d[a]).abs().total_cmp(&area(&loops2d[b]).abs()))
         .unwrap_or(0);
     loops2d.swap(0, outer_index);
     loops3d.swap(0, outer_index);
 
-    // Les trous sont décalés d'un nombre entier de tours pour rester près du contour externe.
+    // Shift holes by whole revolutions to keep them near the outer contour.
     for axis in 0..2 {
         if !periodic[axis] {
             continue;
@@ -141,7 +141,7 @@ fn tessellate_face(
         p[1] *= scale[1];
     }
 
-    // Pas des points intérieurs, converti dans l'espace 2D mis à l'échelle.
+    // Interior-point spacing, converted to scaled 2D space.
     let step = chart
         .param_steps(tolerance)
         .map(|s| [s[0] * scale[0], s[1] * scale[1]]);
@@ -157,9 +157,9 @@ fn tessellate_face(
     let boundary: Vec<Point3> = loops3d.iter().flatten().copied().collect();
     for (q, &src) in points.iter().zip(&source) {
         let (p, normal) = match boundary.get(src) {
-            // Point de contour : position exacte, partagée avec les faces voisines.
+            // Contour point: exact position, shared with adjacent faces.
             Some(&p) => (p, chart.normal(p)),
-            // Point intérieur : position et normale analytiques depuis (u, v).
+            // Interior point: position and analytical normal from (u, v).
             None => {
                 let uv = [q[0] / scale[0], q[1] / scale[1]];
                 let p = chart.point(uv);

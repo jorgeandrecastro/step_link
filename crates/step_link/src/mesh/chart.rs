@@ -1,4 +1,4 @@
-//! Projection d'une face dans l'espace paramétrique de sa surface.
+//! Projection of a face into its surface's parametric space.
 
 use super::spline::SplineChart;
 use crate::brep::{Frame, Point3, Surface, dot, normalize, sub};
@@ -8,14 +8,14 @@ pub(super) enum Chart {
     Plane(Frame),
     Cylinder(Frame),
     Cone(Frame, f64),
-    /// Repère, rayon.
+    /// Frame and radius.
     Sphere(Frame, f64),
-    /// Repère, rayon majeur, rayon mineur.
+    /// Frame, major radius, and minor radius.
     Torus(Frame, f64, f64),
     BSpline(Box<SplineChart>),
 }
 
-/// Distance à l'axe `z` et hauteur le long de cet axe.
+/// Distance from the `z` axis and height along that axis.
 fn radial_and_height(frame: &Frame, p: Point3) -> (f64, f64) {
     let d = sub(p, frame.origin);
     let h = dot(d, frame.z);
@@ -28,7 +28,7 @@ fn radial_direction(frame: &Frame, p: Point3) -> Point3 {
     normalize(std::array::from_fn(|k| d[k] - h * frame.z[k]))
 }
 
-/// Point exprimé dans le repère local `(x, y, z)` converti en coordonnées globales.
+/// Converts a point in the local `(x, y, z)` frame to global coordinates.
 fn from_local(f: &Frame, c: Point3) -> Point3 {
     let y = f.y();
     std::array::from_fn(|k| f.origin[k] + c[0] * f.x[k] + c[1] * y[k] + c[2] * f.z[k])
@@ -52,7 +52,7 @@ impl Chart {
         }
     }
 
-    /// Axes `(u, v)` périodiques (angles) dont les coordonnées doivent être rendues continues.
+    /// Periodic `(u, v)` axes (angles) whose coordinates must be made continuous.
     pub(super) fn periodic(&self) -> [bool; 2] {
         match self {
             Self::Plane(_) | Self::BSpline(_) => [false, false],
@@ -61,7 +61,7 @@ impl Chart {
         }
     }
 
-    /// Coordonnées dans l'espace de la surface (angles pour les axes périodiques).
+    /// Coordinates in the surface's parameter space (angles for periodic axes).
     pub(super) fn uv(&self, p: Point3) -> [f64; 2] {
         match self {
             Self::Plane(f) => {
@@ -87,7 +87,7 @@ impl Chart {
         }
     }
 
-    /// Normale de la surface en `p` (avant prise en compte de `same_sense`).
+    /// Surface normal at `p` (before accounting for `same_sense`).
     pub(super) fn normal(&self, p: Point3) -> Point3 {
         match self {
             Self::Plane(f) => f.z,
@@ -107,7 +107,7 @@ impl Chart {
         }
     }
 
-    /// Normale en un point dont on connaît déjà `(u, v)` (évite l'inversion pour les B-splines).
+    /// Normal at a point whose `(u, v)` coordinates are already known (avoids inversion for B-splines).
     pub(super) fn normal_uv(&self, uv: [f64; 2], p: Point3) -> Point3 {
         match self {
             Self::BSpline(s) => s.normal_uv(uv[0], uv[1]),
@@ -115,10 +115,10 @@ impl Chart {
         }
     }
 
-    /// Point 3D pour des coordonnées `(u, v)` non mises à l'échelle.
+    /// 3D point for unscaled `(u, v)` coordinates.
     ///
-    /// Cylindres et cônes n'ont jamais de points intérieurs (voir [`Self::param_steps`]) :
-    /// ils se replient sur l'origine du repère.
+    /// Cylinders and cones never have interior points (see [`Self::param_steps`]):
+    /// they collapse to the frame origin.
     pub(super) fn point(&self, uv: [f64; 2]) -> Point3 {
         let [u, v] = uv;
         match self {
@@ -136,10 +136,10 @@ impl Chart {
         }
     }
 
-    /// Pas des points intérieurs, en unités de paramètre (radians ou paramètre B-spline).
-    /// `None` : surface plane ou réglée, les contours suffisent.
+    /// Interior-point spacing in parameter units (radians or B-spline parameter units).
+    /// `None`: for planar or ruled surfaces, the contours are sufficient.
     pub(super) fn param_steps(&self, tolerance: f64) -> Option<[f64; 2]> {
-        // Pas angulaire dont la flèche sur un cercle de rayon `radius` reste sous `tolerance`.
+        // Angular step that keeps the sagitta on a circle of radius `radius` below `tolerance`.
         let angle = |radius: f64| {
             let ratio = (tolerance / radius.max(1e-9)).min(1.0);
             (2.0 * (1.0 - ratio).acos()).clamp(0.02, 1.0)
@@ -155,13 +155,13 @@ impl Chart {
         }
     }
 
-    /// Facteurs appliqués à `(u, v)` pour obtenir des coordonnées 2D proches du métrique.
+    /// Factors applied to `(u, v)` to obtain approximately metric 2D coordinates.
     pub(super) fn scale(&self, loops: &[Vec<Point3>]) -> [f64; 2] {
         match self {
             Self::Plane(_) => [1.0, 1.0],
             Self::Cylinder(f) | Self::Cone(f, _) => [mean_radius(f, loops), 1.0],
             Self::Sphere(f, radius) => {
-                // La longueur d'un degré de longitude vaut `R·cos(latitude)`.
+                // The length of one degree of longitude is `R·cos(latitude)`.
                 let (sum, count) = loops.iter().flatten().fold((0.0, 0usize), |(s, n), &p| {
                     let d = sub(p, f.origin);
                     let (r, _) = radial_and_height(f, p);
@@ -189,7 +189,7 @@ fn mean_radius(frame: &Frame, loops: &[Vec<Point3>]) -> f64 {
     }
 }
 
-/// Rend les angles continus le long d'une boucle, pour l'axe `axis`.
+/// Makes angles continuous along a loop for the `axis` axis.
 pub(super) fn unwrap_axis(uv: &mut [[f64; 2]], axis: usize) {
     for i in 1..uv.len() {
         let previous = uv[i - 1][axis];

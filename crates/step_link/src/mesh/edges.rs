@@ -1,14 +1,14 @@
-//! Discrétisation des arêtes (droites, cercles, ellipses, B-splines) et des boucles.
+//! Discretization of edges (lines, circles, ellipses, B-splines) and loops.
 
 use super::spline::sample_bspline;
 use crate::brep::{Curve, Edge, EdgeId, Frame, Loop, Point3, Solid, dot, sub};
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, TAU};
 
-/// Points déjà calculés de chaque arête, partagés entre faces voisines.
+/// Cached points for each edge, shared between adjacent faces.
 pub(super) type EdgeCache = HashMap<EdgeId, Vec<Point3>>;
 
-/// Points d'une arête, de `start` à `end`, extrémités comprises.
+/// Points on an edge from `start` to `end`, including both endpoints.
 fn edge_polyline(solid: &Solid, edge: &Edge, tolerance: f64) -> Vec<Point3> {
     let (Some(a), Some(b)) = (solid.vertices.get(edge.start), solid.vertices.get(edge.end)) else {
         return Vec::new();
@@ -28,7 +28,7 @@ fn edge_polyline(solid: &Solid, edge: &Edge, tolerance: f64) -> Vec<Point3> {
     points
 }
 
-/// Échantillonne la courbe dans son sens naturel, de `from` à `to`.
+/// Samples the curve in its natural direction, from `from` to `to`.
 fn sample_curve(curve: &Curve, from: Point3, to: Point3, tolerance: f64) -> Vec<Point3> {
     match curve {
         Curve::Line => vec![from, to],
@@ -44,7 +44,7 @@ fn sample_curve(curve: &Curve, from: Point3, to: Point3, tolerance: f64) -> Vec<
     }
 }
 
-/// Arc de cercle ou d'ellipse parcouru dans le sens trigonométrique ; `from == to` donne un tour complet.
+/// Circular or elliptical arc traversed counterclockwise; `from == to` makes a full revolution.
 fn sample_conic(
     frame: &Frame,
     a: f64,
@@ -82,7 +82,7 @@ fn sample_conic(
         .collect()
 }
 
-/// Points d'une boucle, sans répéter le point de jonction entre deux arêtes.
+/// Points on a loop, without repeating the shared endpoint between consecutive edges.
 pub(super) fn loop_polyline(
     solid: &Solid,
     cache: &mut EdgeCache,

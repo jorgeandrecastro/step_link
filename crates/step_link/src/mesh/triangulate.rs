@@ -1,15 +1,15 @@
 //! Triangulation 2D.
 //!
-//! - [`triangulate_refined`] : Delaunay contraint (`spade`) avec points intérieurs optionnels.
-//! - [`triangulate`] : *ear clipping* avec trous raccordés par des ponts, utilisé comme repli
-//!   quand les contours sont pathologiques (auto-intersections après dépliage UV, par exemple).
+//! - [`triangulate_refined`]: constrained Delaunay (`spade`) with optional interior points.
+//! - [`triangulate`]: *ear clipping* with holes connected by bridges, used as a fallback
+//!   for pathological contours (e.g. self-intersections after UV unwrapping).
 
 use spade::Triangulation as _;
 use spade::{ConstrainedDelaunayTriangulation, HasPosition, Point2};
 
 const EPS: f64 = 1e-12;
 
-/// Nombre maximal de points intérieurs par face (le pas est agrandi au besoin).
+/// Maximum number of interior points per face (spacing is increased as needed).
 const MAX_INTERIOR_POINTS: usize = 6_000;
 
 fn cross2(o: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -20,7 +20,7 @@ fn same(a: [f64; 2], b: [f64; 2]) -> bool {
     (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9
 }
 
-/// Aire signée d'un polygone (positive dans le sens trigonométrique).
+/// Signed area of a polygon (positive when counterclockwise).
 pub(super) fn area(poly: &[[f64; 2]]) -> f64 {
     let n = poly.len();
     (0..n)
@@ -47,7 +47,7 @@ fn crosses_ring(pts: &[[f64; 2]], a: [f64; 2], b: [f64; 2], ring: &[usize]) -> b
     })
 }
 
-/// Plus court segment entre un sommet de `ring` et un sommet de `hole` qui ne coupe aucun contour.
+/// Shortest segment between a vertex in `ring` and a vertex in `hole` that crosses no contour.
 fn find_bridge(
     pts: &[[f64; 2]],
     ring: &[usize],
@@ -100,7 +100,7 @@ fn clip_ears(pts: &[[f64; 2]], mut ring: Vec<usize>) -> Vec<[usize; 3]> {
             is_ear(pts, &ring, p, c, nx)
         });
         let index = ear.unwrap_or_else(|| {
-            // Contour dégénéré : on retire le sommet le plus convexe pour terminer.
+            // Degenerate contour: remove the most convex vertex to finish.
             let convexity = |i: usize| {
                 let (p, c, nx) = triple(i);
                 cross2(pts[p], pts[c], pts[nx])
@@ -121,10 +121,10 @@ fn clip_ears(pts: &[[f64; 2]], mut ring: Vec<usize>) -> Vec<[usize; 3]> {
     triangles
 }
 
-/// Triangule un polygone avec trous par *ear clipping*.
+/// Triangulates a polygon with holes using *ear clipping*.
 ///
-/// Les indices retournés visent les points de `outer` suivis de ceux de chaque trou,
-/// dans l'ordre donné. Les triangles sont orientés dans le sens trigonométrique.
+/// The returned indices refer to the points in `outer`, followed by the points in each hole
+/// in the given order. Triangles are counterclockwise.
 pub(super) fn triangulate(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Vec<[usize; 3]> {
     let mut pts: Vec<[f64; 2]> = outer.to_vec();
     let mut ring: Vec<usize> = (0..outer.len()).collect();
@@ -162,11 +162,11 @@ pub(super) fn triangulate(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Vec<[u
 }
 
 // ---------------------------------------------------------------------------------------------
-// Delaunay contraint avec points intérieurs
+// Constrained Delaunay with interior points
 // ---------------------------------------------------------------------------------------------
 
-/// Sommet `spade` : `source` est l'indice dans la liste des contours mise à plat
-/// (`usize::MAX` pour un point intérieur).
+/// `spade` vertex: `source` is the index in the flattened contour list
+/// (`usize::MAX` for an interior point).
 struct Vertex {
     position: Point2<f64>,
     source: usize,
@@ -180,17 +180,17 @@ impl HasPosition for Vertex {
     }
 }
 
-/// Résultat de la triangulation.
+/// Triangulation result.
 ///
-/// `source[i]` vaut l'indice du point `i` dans la liste `outer` puis `holes` (mise à plat),
-/// ou `usize::MAX` pour un point intérieur ajouté. Les triangles sont dans le sens trigonométrique.
+/// `source[i]` is the index of point `i` in the flattened `outer` and `holes` lists,
+/// or `usize::MAX` for an added interior point. Triangles are counterclockwise.
 pub(super) struct Triangulation {
     pub points: Vec<[f64; 2]>,
     pub source: Vec<usize>,
     pub triangles: Vec<[usize; 3]>,
 }
 
-/// Repli : *ear clipping*, sans point intérieur.
+/// Fallback: *ear clipping*, without interior points.
 fn fallback(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Triangulation {
     let points: Vec<[f64; 2]> = outer.iter().chain(holes.iter().flatten()).copied().collect();
     Triangulation {
@@ -200,7 +200,7 @@ fn fallback(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Triangulation {
     }
 }
 
-/// Test point-dans-polygone (règle pair/impair sur l'ensemble des contours).
+/// Point-in-polygon test (even-odd rule across all contours).
 fn inside_rings(rings: &[&[[f64; 2]]], p: [f64; 2]) -> bool {
     let mut inside = false;
     for ring in rings {
@@ -233,7 +233,7 @@ fn far_from_ring(ring: &[[f64; 2]], p: [f64; 2], margin: f64) -> bool {
     (0..ring.len()).all(|i| dist_to_segment(p, ring[i], ring[(i + 1) % ring.len()]) >= margin)
 }
 
-/// Grille décalée (nid d'abeille) couvrant la boîte englobante du contour externe.
+/// Staggered (honeycomb) grid covering the bounding box of the outer contour.
 fn grid_candidates(outer: &[[f64; 2]], step: [f64; 2]) -> Vec<[f64; 2]> {
     let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
     for p in outer {
@@ -276,7 +276,7 @@ fn grid_candidates(outer: &[[f64; 2]], step: [f64; 2]) -> Vec<[f64; 2]> {
 fn build_cdt(rings: &[&[[f64; 2]]], interior: &[[f64; 2]]) -> Option<Triangulation> {
     let mut cdt = ConstrainedDelaunayTriangulation::<Vertex>::new();
 
-    // 1. Tous les sommets des contours d'abord, puis les contraintes.
+    // 1. Add all contour vertices first, then the constraints.
     let mut ring_handles = Vec::with_capacity(rings.len());
     let mut next = 0usize;
     for ring in rings {
@@ -304,7 +304,7 @@ fn build_cdt(rings: &[&[[f64; 2]]], interior: &[[f64; 2]]) -> Option<Triangulati
         }
     }
 
-    // 2. Points intérieurs. Un point confondu avec un sommet existant est sans conséquence.
+    // 2. Interior points. A point coinciding with an existing vertex has no effect.
     for p in interior {
         let _ = cdt.insert(Vertex {
             position: Point2::new(p[0], p[1]),
@@ -321,9 +321,9 @@ fn build_cdt(rings: &[&[[f64; 2]]], interior: &[[f64; 2]]) -> Option<Triangulati
         source[i] = v.data().source;
     }
 
-    // La triangulation couvre l'enveloppe convexe : on garde les triangles situés dans la face
-    // (règle pair/impair, ce qui exclut aussi les trous). Les contours étant des arêtes
-    // contraintes, un triangle est entièrement dedans ou entièrement dehors.
+    // The triangulation covers the convex hull: keep triangles inside the face
+    // (the even-odd rule also excludes holes). Since contours are constrained edges,
+    // each triangle lies entirely inside or outside.
     let mut triangles = Vec::new();
     for face in cdt.inner_faces() {
         let [a, b, c] = face.vertices().map(|v| v.fix().index());
@@ -334,7 +334,7 @@ fn build_cdt(rings: &[&[[f64; 2]]], interior: &[[f64; 2]]) -> Option<Triangulati
         if !inside_rings(rings, centroid) {
             continue;
         }
-        // Orientation trigonométrique garantie, triangles plats écartés.
+        // Counterclockwise orientation is guaranteed; degenerate triangles are discarded.
         let orientation = cross2(points[a], points[b], points[c]);
         if orientation > 0.0 {
             triangles.push([a, b, c]);
@@ -352,11 +352,11 @@ fn build_cdt(rings: &[&[[f64; 2]]], interior: &[[f64; 2]]) -> Option<Triangulati
     })
 }
 
-/// Triangulation de Delaunay contrainte par les contours, avec points intérieurs optionnels.
+/// Constrained Delaunay triangulation of contours, with optional interior points.
 ///
-/// `step` : pas de la grille intérieure, dans le même espace 2D que les contours
-/// (`None` : aucun point intérieur). En cas d'échec (contours qui se croisent, valeurs non
-/// finies), retombe sur l'*ear clipping* sans point intérieur.
+/// `step`: interior-grid spacing in the same 2D space as the contours
+/// (`None`: no interior points). On failure (intersecting contours or non-finite values),
+/// falls back to *ear clipping* without interior points.
 pub(super) fn triangulate_refined(
     outer: &[[f64; 2]],
     holes: &[Vec<[f64; 2]>],
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn self_intersecting_outline_falls_back() {
-        // Nœud papillon : spade refuse la contrainte, on retombe sur l'ear clipping sans panique.
+        // Bow-tie contour: spade rejects the constraint, so fall back to ear clipping without panicking.
         let outer = [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0]];
         let t = triangulate_refined(&outer, &[], Some([0.5, 0.5]));
         assert_eq!(t.points.len(), t.source.len());

@@ -1,19 +1,19 @@
 //! Topologie B-Rep (Boundary Representation).
 //!
-//! Hiérarchie : [`Solid`] → [`Shell`] → [`Face`] → [`Loop`] → [`OrientedEdge`] → [`Edge`] → [`Vertex`].
-//! Les sommets et arêtes sont stockés une seule fois dans le [`Solid`] et référencés par
-//! index : une arête partagée par deux faces n'existe qu'une fois.
+//! Hierarchy: [`Solid`] → [`Shell`] → [`Face`] → [`Loop`] → [`OrientedEdge`] → [`Edge`] → [`Vertex`].
+//! Vertices and edges are stored once in the [`Solid`] and referenced by
+//! index: an edge shared by two faces exists only once.
 
-/// Point (ou vecteur) 3D en double précision.
+/// 3D point (or vector) in double precision.
 pub type Point3 = [f64; 3];
 
-/// Index d'un sommet dans [`Solid::vertices`].
+/// Index of a vertex in [`Solid::vertices`].
 pub type VertexId = usize;
 
-/// Index d'une arête dans [`Solid::edges`].
+/// Index of an edge in [`Solid::edges`].
 pub type EdgeId = usize;
 
-/// Couleur RGB (sRGB, composantes entre 0 et 1).
+/// RGB color (sRGB, components between 0 and 1).
 pub type Color = [f32; 3];
 
 pub(crate) fn dot(a: Point3, b: Point3) -> f64 {
@@ -41,21 +41,21 @@ pub(crate) fn normalize(v: Point3) -> Point3 {
     }
 }
 
-/// Repère orthonormé (`AXIS2_PLACEMENT_3D` en STEP).
+/// Orthonormal frame (`AXIS2_PLACEMENT_3D` in STEP).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Frame {
-    /// Origine du repère.
+    /// Frame origin.
     pub origin: Point3,
-    /// Axe Z unitaire.
+    /// Unit Z axis.
     pub z: Point3,
-    /// Axe X unitaire, orthogonal à `z`.
+    /// Unit X axis, orthogonal to `z`.
     pub x: Point3,
 }
 
 impl Frame {
-    /// Crée un repère ; `z` est normalisé et `x` est orthogonalisé par rapport à `z`.
+    /// Creates a frame; `z` is normalized and `x` is orthogonalized against `z`.
     ///
-    /// `x` ne doit pas être colinéaire à `z`.
+    /// `x` must not be collinear with `z`.
     pub fn new(origin: Point3, z: Point3, x: Point3) -> Self {
         let z = normalize(z);
         let d = dot(x, z);
@@ -63,7 +63,7 @@ impl Frame {
         Self { origin, z, x }
     }
 
-    /// Crée un repère dont seul l'axe Z est imposé ; X est choisi arbitrairement.
+    /// Creates a frame with only the Z axis specified; X is chosen arbitrarily.
     pub fn from_normal(origin: Point3, z: Point3) -> Self {
         let z = normalize(z);
         let helper = if z[0].abs() < 0.9 {
@@ -78,21 +78,21 @@ impl Frame {
         }
     }
 
-    /// Axe Y unitaire (`z × x`).
+    /// Unit Y axis (`z × x`).
     pub fn y(&self) -> Point3 {
         cross(self.z, self.x)
     }
 }
 
-/// Sommet : un point de l'espace.
+/// Vertex: a point in space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
-    /// Position du sommet.
+    /// Vertex position.
     pub position: Point3,
 }
 
 impl Vertex {
-    /// Crée un sommet à la position donnée.
+    /// Creates a vertex at the given position.
     pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self {
             position: [x, y, z],
@@ -100,183 +100,183 @@ impl Vertex {
     }
 }
 
-/// Courbe portée par une arête.
+/// Curve carried by an edge.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Curve {
-    /// Segment de droite entre les sommets de l'arête.
+    /// Line segment between the edge's vertices.
     Line,
-    /// Cercle (ou arc) dans le plan XY du repère.
+    /// Circle (or arc) in the frame's XY plane.
     Circle {
-        /// Repère du cercle.
+        /// Circle frame.
         frame: Frame,
-        /// Rayon.
+        /// Radius.
         radius: f64,
     },
-    /// Ellipse (ou arc) dans le plan XY du repère.
+    /// Ellipse (or arc) in the frame's XY plane.
     Ellipse {
-        /// Repère de l'ellipse.
+        /// Ellipse frame.
         frame: Frame,
-        /// Demi-axe selon X.
+        /// Semiaxis along X.
         semi_major: f64,
-        /// Demi-axe selon Y.
+        /// Semiaxis along Y.
         semi_minor: f64,
     },
-    /// Courbe B-spline (rationnelle si `weights` est renseigné).
+    /// B-spline curve (rational if `weights` is provided).
     BSpline(BSplineCurve),
 }
 
-/// Courbe B-spline.
+/// B-spline curve.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BSplineCurve {
-    /// Degré.
+    /// Degree.
     pub degree: usize,
-    /// Points de contrôle.
+    /// Control points.
     pub control_points: Vec<Point3>,
-    /// Poids des points de contrôle (NURBS), absents pour une B-spline non rationnelle.
+    /// Control-point weights (NURBS), absent for a non-rational B-spline.
     pub weights: Option<Vec<f64>>,
-    /// Vecteur de nœuds développé (multiplicités déjà appliquées).
+    /// Expanded knot vector (multiplicities already applied).
     pub knots: Vec<f64>,
 }
 
-/// Surface portée par une face.
+/// Surface carried by a face.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Surface {
-    /// Plan passant par l'origine du repère, de normale `z`.
+    /// Plane through the frame origin with normal `z`.
     Plane {
-        /// Repère du plan.
+        /// Plane frame.
         frame: Frame,
     },
-    /// Cylindre d'axe `z`.
+    /// Cylinder with axis `z`.
     Cylinder {
-        /// Repère du cylindre.
+        /// Cylinder frame.
         frame: Frame,
-        /// Rayon.
+        /// Radius.
         radius: f64,
     },
-    /// Cône d'axe `z`.
+    /// Cone with axis `z`.
     Cone {
-        /// Repère du cône.
+        /// Cone frame.
         frame: Frame,
-        /// Rayon à l'origine.
+        /// Radius at the origin.
         radius: f64,
-        /// Demi-angle au sommet, en radians.
+        /// Half-angle at the apex, in radians.
         semi_angle: f64,
     },
-    /// Sphère centrée sur l'origine du repère.
+    /// Sphere centered at the frame origin.
     Sphere {
-        /// Repère de la sphère.
+        /// Sphere frame.
         frame: Frame,
-        /// Rayon.
+        /// Radius.
         radius: f64,
     },
-    /// Tore d'axe `z`.
+    /// Torus with axis `z`.
     Torus {
-        /// Repère du tore.
+        /// Torus frame.
         frame: Frame,
-        /// Rayon majeur.
+        /// Major radius.
         major_radius: f64,
-        /// Rayon mineur.
+        /// Minor radius.
         minor_radius: f64,
     },
-    /// Surface B-spline (rationnelle si `weights` est renseigné).
+    /// B-spline surface (rational if `weights` is provided).
     BSpline(BSplineSurface),
 }
 
-/// Surface B-spline.
+/// B-spline surface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BSplineSurface {
-    /// Degré selon u.
+    /// Degree along u.
     pub degree_u: usize,
-    /// Degré selon v.
+    /// Degree along v.
     pub degree_v: usize,
-    /// Grille de points de contrôle, indexée `[u][v]`.
+    /// Control-point grid, indexed by `[u][v]`.
     pub control_points: Vec<Vec<Point3>>,
-    /// Poids de la grille (NURBS), absents pour une B-spline non rationnelle.
+    /// Grid weights (NURBS), absent for a non-rational B-spline.
     pub weights: Option<Vec<Vec<f64>>>,
-    /// Vecteur de nœuds développé selon u.
+    /// Expanded knot vector along u.
     pub knots_u: Vec<f64>,
-    /// Vecteur de nœuds développé selon v.
+    /// Expanded knot vector along v.
     pub knots_v: Vec<f64>,
 }
 
-/// Arête : une courbe entre deux sommets, partagée par les faces adjacentes.
+/// Edge: a curve between two vertices, shared by adjacent faces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
-    /// Sommet de départ.
+    /// Starting vertex.
     pub start: VertexId,
-    /// Sommet d'arrivée.
+    /// Ending vertex.
     pub end: VertexId,
-    /// Courbe portée par l'arête.
+    /// Curve carried by the edge.
     pub curve: Curve,
-    /// `true` si la courbe est parcourue dans le même sens que l'arête (de `start` vers `end`).
+    /// `true` if the curve runs in the same direction as the edge (from `start` to `end`).
     pub same_sense: bool,
 }
 
-/// Utilisation d'une arête dans une boucle, avec son sens de parcours.
+/// Use of an edge in a loop, including its traversal direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OrientedEdge {
-    /// Arête utilisée.
+    /// Edge being used.
     pub edge: EdgeId,
-    /// `true` si l'arête est parcourue de `start` vers `end`.
+    /// `true` if the edge is traversed from `start` to `end`.
     pub forward: bool,
 }
 
-/// Boucle fermée d'arêtes orientées, consécutives.
+/// Closed loop of consecutive oriented edges.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Loop {
-    /// Arêtes de la boucle, dans l'ordre de parcours.
+    /// Edges in the loop, in traversal order.
     pub edges: Vec<OrientedEdge>,
 }
 
-/// Face : une portion de surface délimitée par une boucle externe et des trous.
+/// Face: a portion of a surface bounded by an outer loop and holes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Face {
-    /// Surface support.
+    /// Supporting surface.
     pub surface: Surface,
-    /// Boucle externe.
+    /// Outer loop.
     pub outer_loop: Loop,
     /// Boucles internes (trous).
     pub inner_loops: Vec<Loop>,
-    /// `true` si la normale de la face suit celle de la surface, `false` si elle est inversée.
+    /// `true` if the face normal follows the surface normal, `false` if it is reversed.
     pub same_sense: bool,
-    /// Couleur propre à la face, prioritaire sur celle du solide.
+    /// Color assigned to the face, taking priority over the solid's color.
     pub color: Option<Color>,
 }
 
-/// Coque : ensemble connexe de faces.
+/// Shell: a connected set of faces.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Shell {
-    /// Faces de la coque.
+    /// Faces in the shell.
     pub faces: Vec<Face>,
 }
 
-/// Solide : géométrie partagée (sommets, arêtes) et coques qui l'utilisent.
+/// Solid: shared geometry (vertices and edges) and the shells that use it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Solid {
-    /// Sommets, référencés par [`VertexId`].
+    /// Vertices, referenced by [`VertexId`].
     pub vertices: Vec<Vertex>,
-    /// Arêtes, référencées par [`EdgeId`].
+    /// Edges, referenced by [`EdgeId`].
     pub edges: Vec<Edge>,
-    /// Coques (la première est la coque externe).
+    /// Shells (the first is the outer shell).
     pub shells: Vec<Shell>,
-    /// Couleur du solide, utilisée par les faces sans couleur propre.
+    /// Solid color, used by faces without an assigned color.
     pub color: Option<Color>,
 }
 
 impl Solid {
-    /// Itère sur toutes les faces du solide.
+    /// Iterates over all faces in the solid.
     pub fn faces(&self) -> impl Iterator<Item = &Face> {
         self.shells.iter().flat_map(|s| s.faces.iter())
     }
 
-    /// Nombre total de faces du solide.
+    /// Total number of faces in the solid.
     pub fn face_count(&self) -> usize {
         self.faces().count()
     }
 
-    /// Points de départ de chaque arête orientée d'une boucle, dans l'ordre.
+    /// Starting points of each oriented edge in a loop, in order.
     ///
-    /// Les index invalides sont ignorés.
+    /// Invalid indices are ignored.
     pub fn loop_points(&self, face_loop: &Loop) -> Vec<Point3> {
         face_loop
             .edges
@@ -289,9 +289,9 @@ impl Solid {
             .collect()
     }
 
-    /// Construit un parallélépipède rectangle centré sur l'origine.
+    /// Builds a rectangular cuboid centered at the origin.
     ///
-    /// 8 sommets, 12 arêtes partagées, 6 faces planes.
+    /// 8 vertices, 12 shared edges, 6 planar faces.
     pub fn cuboid(width: f64, height: f64, depth: f64) -> Self {
         let half = [width / 2.0, height / 2.0, depth / 2.0];
         let vertices: Vec<Vertex> = (0..8usize)
@@ -305,7 +305,7 @@ impl Solid {
             usize::from(sx > 0) | (usize::from(sy > 0) << 1) | (usize::from(sz > 0) << 2)
         };
 
-        // Sommets en sens anti-horaire vu de l'extérieur, et normale sortante.
+        // Vertices in counterclockwise order as seen from outside, with outward normals.
         let definitions: [([[i8; 3]; 4], Point3); 6] = [
             ([[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]], [0.0, 0.0, 1.0]),
             ([[-1, -1, -1], [-1, 1, -1], [1, 1, -1], [1, -1, -1]], [0.0, 0.0, -1.0]),
@@ -340,7 +340,7 @@ impl Solid {
     }
 }
 
-/// Retrouve l'arête `a → b` (ou `b → a`, parcourue à l'envers), sinon la crée.
+/// Finds the edge `a → b` (or `b → a`, traversed in reverse), or creates it if absent.
 fn oriented_edge(edges: &mut Vec<Edge>, a: VertexId, b: VertexId) -> OrientedEdge {
     if let Some(i) = edges.iter().position(|e| e.start == a && e.end == b) {
         return OrientedEdge {
@@ -366,7 +366,7 @@ fn oriented_edge(edges: &mut Vec<Edge>, a: VertexId, b: VertexId) -> OrientedEdg
     }
 }
 
-/// Boucle polygonale fermée à partir de sommets ordonnés.
+/// Closed polygonal loop from ordered vertices.
 fn polygon_loop(edges: &mut Vec<Edge>, ids: &[VertexId]) -> Loop {
     let oriented = (0..ids.len())
         .map(|i| oriented_edge(edges, ids[i], ids[(i + 1) % ids.len()]))

@@ -1,15 +1,15 @@
-//! Exemple minimal : charge une pièce STEP et l'affiche avec Bevy.
+//! Minimal example: load a STEP part and display it with Bevy.
 //!
-//! Lancer avec : `cargo run -p bevy_step_link --example load_step`
-//! (le fichier est cherché dans `crates/bevy_step_link/assets/models/part.step`).
+//! Run with: `cargo run -p bevy_step_link --example load_step`
+//! (the file is expected at `crates/bevy_step_link/assets/models/part.step`).
 //!
-//! Contrôles : clic gauche + glisser pour tourner, molette pour zoomer.
+//! Controls: left-click and drag to orbit; scroll to zoom.
 
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy_step_link::StepLinkPlugin;
 
-/// Agrandissement d'affichage : le loader livre des mètres (pièce d'environ 4 cm).
+/// Display scale: the loader outputs meters (the part is about 4 cm across).
 const SCALE: f32 = 50.0;
 
 fn main() {
@@ -20,7 +20,7 @@ fn main() {
         .run();
 }
 
-/// État de la caméra orbitale autour d'un point.
+/// State for the orbit camera around a point.
 #[derive(Component)]
 struct OrbitCamera {
     focus: Vec3,
@@ -34,8 +34,8 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Le .step est chargé directement comme un Mesh, déjà en mètres et en Y-up.
-    // Les couleurs du fichier sont portées par le maillage : le matériau reste blanc.
+    // The .step file is loaded directly as a Mesh, already in meters and Y-up.
+    // File colors are stored in the mesh, so the material remains white.
     let mesh: Handle<Mesh> = asset_server.load("models/part.step");
 
     commands.spawn((
@@ -44,14 +44,14 @@ fn setup(
         Transform::from_scale(Vec3::splat(SCALE)),
     ));
 
-    // Centre de la pièce : boîte englobante STEP (-20,-20,0)..(20,30,35) mm,
-    // soit (0, 5, 17.5) mm ; après le loader (mètres, Y-up) : (0, 17.5, -5) mm.
+    // Part center: STEP bounding box (-20,-20,0)..(20,30,35) mm,
+    // i.e. (0, 5, 17.5) mm; after the loader (meters, Y-up): (0, 17.5, -5) mm.
     let focus = Vec3::new(0.0, 0.0175, -0.005) * SCALE;
 
-    // Caméra orbitale.
+    // Orbit camera.
     commands.spawn((
         Camera3d::default(),
-        Transform::default(), // recalculé par `orbit_camera`
+        Transform::default(), // recalculated by `orbit_camera`
         OrbitCamera {
             focus,
             radius: 6.0,
@@ -60,7 +60,7 @@ fn setup(
         },
     ));
 
-    // Lumière ponctuelle.
+    // Point light.
     commands.spawn((
         PointLight {
             shadow_maps_enabled: true,
@@ -69,14 +69,14 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
 
-    // Lumière ambiante globale pour que les faces à l'ombre ne soient pas noires.
+    // Global ambient light keeps shadowed faces from appearing black.
     commands.insert_resource(GlobalAmbientLight {
         brightness: 300.0,
         ..default()
     });
 }
 
-/// Clic gauche + glisser : tourne autour de la pièce. Molette : zoom.
+/// Left-click and drag to orbit around the part. Scroll to zoom.
 fn orbit_camera(
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
@@ -87,7 +87,7 @@ fn orbit_camera(
         if buttons.pressed(MouseButton::Left) {
             orbit.yaw -= motion.delta.x * 0.005;
             orbit.pitch += motion.delta.y * 0.005;
-            // Évite de passer par-dessus les pôles.
+            // Prevent the camera from passing over the poles.
             let limit = std::f32::consts::FRAC_PI_2 - 0.01;
             orbit.pitch = orbit.pitch.clamp(-limit, limit);
         }

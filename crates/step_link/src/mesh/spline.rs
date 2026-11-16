@@ -1,4 +1,4 @@
-//! Évaluation des B-splines : algorithme de de Boor, courbes, surfaces et projection de points.
+//! B-spline evaluation: de Boor's algorithm, curves, surfaces, and point projection.
 
 use super::{dist, scaled};
 use crate::brep::{BSplineCurve, BSplineSurface, Point3, cross, dot, normalize, sub};
@@ -25,7 +25,7 @@ pub(super) fn de_boor(degree: usize, knots: &[f64], control: &[Point3], t: f64) 
     d[degree]
 }
 
-/// Courbe B-spline complète (rationnelle si des poids sont fournis), orientée pour partir de `from`.
+/// Full B-spline curve (rational if weights are provided), oriented to start from `from`.
 pub(super) fn sample_bspline(spline: &BSplineCurve, from: Point3, to: Point3) -> Vec<Point3> {
     let degree = spline.degree;
     let count = spline.control_points.len();
@@ -33,7 +33,7 @@ pub(super) fn sample_bspline(spline: &BSplineCurve, from: Point3, to: Point3) ->
         return vec![from, to];
     }
 
-    // Courbe rationnelle : on interpole les points pondérés et les poids séparément.
+    // Rational curve: interpolate the weighted points and weights separately.
     let (control, weight_track): (Vec<Point3>, Option<Vec<Point3>>) = match &spline.weights {
         Some(w) if w.len() == count => (
             spline
@@ -71,7 +71,7 @@ pub(super) fn sample_bspline(spline: &BSplineCurve, from: Point3, to: Point3) ->
         let d = sub(p, from);
         dot(d, d)
     };
-    // Pas de let-chain ici : elles exigent Rust 1.88, le MSRV du projet est 1.85.
+    // Avoid let-chains here: they require Rust 1.88, while the project's MSRV is 1.85.
     if let (Some(&first), Some(&last)) = (points.first(), points.last()) {
         if distance(first) > distance(last) {
             points.reverse();
@@ -80,23 +80,23 @@ pub(super) fn sample_bspline(spline: &BSplineCurve, from: Point3, to: Point3) ->
     points
 }
 
-/// Surface B-spline préparée pour l'évaluation et l'inversion de points.
+/// B-spline surface prepared for evaluation and point inversion.
 pub(super) struct SplineChart {
     degree_u: usize,
     degree_v: usize,
     knots_u: Vec<f64>,
     knots_v: Vec<f64>,
-    /// Points de contrôle (déjà multipliés par leur poids si la surface est rationnelle).
+    /// Control points (already multiplied by their weights if the surface is rational).
     control: Vec<Vec<Point3>>,
-    /// Poids sous la forme `[w, 0, 0]`, pour réutiliser l'évaluation des points.
+    /// Weights in the form `[w, 0, 0]`, to reuse point evaluation.
     weights: Option<Vec<Vec<Point3>>>,
     /// `[[u_min, u_max], [v_min, v_max]]`.
     domain: [[f64; 2]; 2],
-    /// Échantillons `((u, v), point)` pour la recherche grossière du point le plus proche.
+    /// `((u, v), point)` samples for a coarse nearest-point search.
     grid: Vec<([f64; 2], Point3)>,
-    /// Cellules de la grille d'échantillonnage `[gu, gv]`.
+    /// Sampling-grid cells `[gu, gv]`.
     cells: [usize; 2],
-    /// Longueur 3D approximative par unité de paramètre, pour des coordonnées 2D proches du métrique.
+    /// Approximate 3D length per parameter unit, for near-metric 2D coordinates.
     pub(super) scale: [f64; 2],
 }
 
@@ -219,7 +219,7 @@ impl SplineChart {
         }
     }
 
-    /// Dérivées partielles par différences finies centrées (décentrées au bord du domaine).
+    /// Partial derivatives using central finite differences (one-sided at the domain boundary).
     fn partials(&self, u: f64, v: f64) -> (Point3, Point3) {
         let [[u0, u1], [v0, v1]] = self.domain;
         let (hu, hv) = ((u1 - u0) * 1e-4, (v1 - v0) * 1e-4);
@@ -230,10 +230,10 @@ impl SplineChart {
         (su, sv)
     }
 
-    /// Pas `(du, dv)` tel que la flèche d'une corde de cette longueur reste sous `tolerance`.
+    /// Spacing `(du, dv)` such that the sagitta of a chord of this length stays below `tolerance`.
     ///
-    /// Estimé par la déviation du point central de cordes à 2 cellules sur la grille
-    /// d'échantillonnage : la flèche croît comme le carré de la longueur de la corde.
+    /// Estimated from the midpoint deviation of chords spanning two cells on the sampling
+    /// grid: sagitta grows with the square of the chord length.
     pub(super) fn param_steps(&self, tolerance: f64) -> [f64; 2] {
         let [gu, gv] = self.cells;
         let stride = gv + 1;
@@ -270,7 +270,7 @@ impl SplineChart {
         [steps(dev_u, gu, u1 - u0), steps(dev_v, gv, v1 - v0)]
     }
 
-    /// Paramètres `(u, v)` du point de la surface le plus proche de `p`.
+    /// Parameters `(u, v)` of the surface point closest to `p`.
     pub(super) fn invert(&self, p: Point3) -> [f64; 2] {
         let [[u0, u1], [v0, v1]] = self.domain;
         let mut best = self.grid[0];
@@ -305,7 +305,7 @@ impl SplineChart {
         self.normal_uv(u, v)
     }
 
-    /// Normale en `(u, v)`, sans passer par l'inversion d'un point.
+    /// Normal at `(u, v)`, without inverting a point.
     pub(super) fn normal_uv(&self, u: f64, v: f64) -> Point3 {
         let (su, sv) = self.partials(u, v);
         normalize(cross(su, sv))
@@ -345,7 +345,7 @@ mod tests {
     fn flat_surface_needs_coarse_steps() {
         let chart = SplineChart::new(&flat_surface()).unwrap();
         let [du, dv] = chart.param_steps(0.05);
-        // Une surface plane n'a aucune flèche : le pas couvre tout le domaine.
+        // A planar surface has no sagitta, so the spacing covers the entire domain.
         assert!((du - 1.0).abs() < 1e-9 && (dv - 1.0).abs() < 1e-9);
         let normal = chart.normal_uv(0.5, 0.5);
         assert!(dist(normal, [0.0, 0.0, 1.0]) < 1e-6);

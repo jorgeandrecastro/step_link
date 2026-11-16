@@ -1,7 +1,7 @@
-//! [`AssetLoader`] Bevy pour les fichiers STEP.
+//! Bevy [`AssetLoader`] for STEP files.
 //!
-//! Le maillage est converti en mètres et en axes Bevy (Y vers le haut).
-//! Les couleurs du fichier deviennent des couleurs de sommets.
+//! The mesh is converted to meters and Bevy axes (Y-up).
+//! File colors become vertex colors.
 
 use bevy::asset::{AssetLoader, LoadContext, RenderAssetUsages, io::Reader};
 use bevy::reflect::TypePath;
@@ -10,16 +10,16 @@ use std::fmt;
 use step_link::mesh::{DEFAULT_COLOR, MeshData, tessellate};
 use step_link::parser::{ParseError, parse_step};
 
-/// Erreurs de chargement d'un fichier STEP.
+/// Errors that can occur while loading a STEP file.
 #[derive(Debug)]
 pub enum StepLoaderError {
-    /// Erreur d'entrée/sortie lors de la lecture du fichier.
+    /// An I/O error occurred while reading the file.
     Io(std::io::Error),
-    /// Le fichier n'est pas de l'UTF-8 valide.
+    /// The file is not valid UTF-8.
     Utf8(std::string::FromUtf8Error),
-    /// Le contenu STEP est invalide.
+    /// The STEP content is invalid.
     Parse(ParseError),
-    /// Le fichier ne contient aucun solide.
+    /// The file contains no solids.
     NoSolid,
 }
 
@@ -54,7 +54,7 @@ impl From<ParseError> for StepLoaderError {
     }
 }
 
-/// Chargeur d'assets transformant un fichier `.step` / `.stp` en [`Mesh`].
+/// Asset loader that converts a `.step` / `.stp` file into a [`Mesh`].
 #[derive(Debug, Default, Clone, Copy, TypePath)]
 pub struct StepLoader;
 
@@ -84,7 +84,7 @@ impl AssetLoader for StepLoader {
             return Err(StepLoaderError::NoSolid);
         }
 
-        // Unités du fichier vers mètres, puis Z vers le haut (STEP) vers Y vers le haut (Bevy).
+        // Convert file units to meters, then convert STEP Z-up to Bevy Y-up.
         let scale = model.unit_scale as f32;
         let parts: Vec<MeshData> = model.solids.iter().map(tessellate).collect();
         let colored = parts.iter().any(|p| !p.colors.is_empty());
@@ -116,7 +116,7 @@ impl AssetLoader for StepLoader {
     }
 }
 
-/// Convertit un [`MeshData`] en [`Mesh`] Bevy ; les couleurs sRGB deviennent des couleurs de sommets linéaires.
+/// Converts [`MeshData`] into a Bevy [`Mesh`]; sRGB colors become linear vertex colors.
 fn to_bevy_mesh(data: MeshData) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
