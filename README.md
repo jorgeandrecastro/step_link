@@ -13,6 +13,10 @@ Pure Rust **B-Rep** geometric engine and **STEP (ISO 10303-21)** parser, designe
 
 *`3DBenchy.step` model rendered in Bevy.*
 
+![UMI-HH-06 Gripper Mount loaded from a STEP file and rendered in Bevy](https://raw.githubusercontent.com/jorgeandrecastro/step_link/main/images/image1.png)
+
+*`UMI-HH-06_Gripper-Mount.step` model rendered in Bevy, with round holes and curved faces.*
+
 ## Vision
 
 Import CAD parts (`.step` / `.stp`) directly into a game engine or viewer without going through an external STL/OBJ conversion, preserving the B-Rep topology (solids, shells, faces, edges, vertices) for future use cases: measurement, face selection, and on-the-fly retessellation.
@@ -74,7 +78,7 @@ step_link/
 - [x] Topology reconstruction from STEP entities (planes, cylinders, cones, spheres, tori; lines, circles, ellipses, B-splines)
 - [x] Validated on a real-world export (`WallHook_30mm.stp`): displays accurately in Bevy
 
-> Since 0.4, curved faces (spheres, tori, B-splines/NURBS) receive interior points whose density follows the tolerance: they are no longer faceted. Cylinders and cones (ruled surfaces) remain triangulated by their contours.
+Since 0.6, all curved faces (cylinders, cones, spheres, tori, B-splines/NURBS) receive interior points whose density follows the tolerance, and the default tolerance no longer depends on the file unit.
 
 Since 0.5, solid and face STEP colors are preserved in the mesh. A face color overrides the solid color; faces without a color receive a neutral tint when a mesh contains colors.
 
@@ -84,7 +88,7 @@ Since 0.5, solid and face STEP colors are preserved in the mesh. A face color ov
 Lexer and `#id → entity` graph (`parse_part21`). Parameters: references, integers, reals, strings, enumerations, lists, typed values, `$` and `*`. Complex entities `#5 = (A() B())`.
 
 - [ ] Decode string escape sequences (`\X\`, `\X2\`)
-- [x] Tested on a real export (`WallHook_30mm.stp`)
+- [x] Tested on a real export (`UMI-HH-01_Handle.stp`)
 - [ ] Tests on other exports (Fusion 360, FreeCAD, SolidWorks)
 - [ ] Lexer fuzzing (`cargo fuzz`), zero panics on malformed files
 
@@ -107,12 +111,13 @@ Chain `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND →
 - [x] Cylinders and cones: triangulation in parametric space (angle, height)
 - [x] Spheres and tori
 - [x] Shared edge discretization between adjacent faces
-- [x] Configurable tolerance (max sag) (`tessellate_with_tolerance`)
+- [x] Configurable tolerance (max sag) (`tessellate_with_tolerance`), unit-aware default (`tessellate_with_unit_scale`, 0.01 mm) and bounding-box-relative `tessellate`
 - [x] B-spline/NURBS surfaces: contour projection into (u, v)
 - [x] B-spline/NURBS surfaces, spheres, and tori: interior points
 - [x] Interior subdivision of curved faces (honeycomb grid in UV space)
 - [x] Fallback to *ear clipping* on pathological contours
-- [ ] Interior points for cylinders and cones (angular rails) if faceting remains visible
+- [x] Interior points for cylinders and cones (angular rails)
+- [x] Diagnostics on standard error: skipped faces/contours, *ear clipping* fallbacks, inconsistent winding
 - [ ] Vertex welding across faces
 - [ ] Check the bottom of conical holes (artifact visible on `WallHook_30mm`)
 
@@ -133,14 +138,14 @@ Chain `MANIFOLD_SOLID_BREP → CLOSED_SHELL → ADVANCED_FACE → FACE_BOUND →
 ```toml
 [dependencies]
 bevy = "0.20"
-bevy_step_link = "0.5"
+bevy_step_link = "0.6"
 ```
 
 To use only the core library without Bevy:
 
 ```toml
 [dependencies]
-step_link = "0.5"
+step_link = "0.6"
 ```
 
 ## Example (Bevy)
@@ -223,7 +228,9 @@ To visually inspect a new part in Bevy, place it at `crates/bevy_step_link/asset
 cargo run -p bevy_step_link --example load_step
 ```
 
-The loader converts units to meters and axes to Y-up, and tessellates with a 0.05 mm tolerance converted to file units. The inspector reports the detected unit scale and uses the same tolerance. Unknown and non-SI units currently default to meters. Tessellation diagnostics report skipped contours and triangulation fallbacks on standard error.
+The example enables a white wireframe overlay. It requires a native GPU/backend supporting `POLYGON_MODE_LINE` and `IMMEDIATES`.
+
+The loader converts units to meters and axes to Y-up. It uses `tessellate_with_unit_scale` for a 0.01 mm tolerance; the inspector reports the detected unit scale and uses the same tolerance. `tessellate` instead uses a tolerance relative to the solid's bounding box, while `tessellate_with_tolerance` accepts a tolerance in model units. Unknown and non-SI units currently default to meters. Tessellation diagnostics report skipped contours and triangulation fallbacks on standard error.
 
 `cargo test --workspace` runs the project's automated test suite; this command does not automatically load an arbitrary STEP file.
 

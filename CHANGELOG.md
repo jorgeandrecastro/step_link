@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+- `tessellate_with_unit_scale(solid, unit_scale)`: tessellation with a 0.01 mm tolerance regardless of the file's length unit (`DEFAULT_TOLERANCE_METERS`).
+- Interior points ("angular rails") on cylinders and cones, with correct 3D evaluation of their positions.
+- Diagnostics on standard error: ignored faces or contours, *ear clipping* fallbacks (including unbridged holes), and faces whose winding disagrees with their normals.
+- `inspect` example prints `unit_scale`; `load_step` example enables a wireframe overlay (requires `POLYGON_MODE_LINE` and `IMMEDIATES` GPU support).
+- Tests: cylinder and cone interior points, identical segment counts for the same cylinder in cm and mm, merged wound loops.
+
+### Changed
+- `tessellate(solid)` now uses a tolerance relative to the solid's bounding-box diagonal (`diagonal * 5e-4`) instead of a fixed value in model units; `DEFAULT_TOLERANCE` remains the fallback for degenerate bounding boxes.
+- The Bevy loader and the `inspect` example use `tessellate_with_unit_scale`, fixing coarse (octagonal) holes in files not expressed in millimeters.
+- Minimum tolerance clamp lowered to `1e-12`.
+
+### Fixed
+- Drilled cylinder, cone, and sphere zones bounded by two full circles without a seam edge are merged into a single band (artificial seam), with the second circle aligned to the first to avoid inverted triangles.
+- A degenerate outer contour no longer lets an inner contour be mistaken for the outer one: the face is skipped and reported.
+
 ## 0.5.1
 
 ### Changed

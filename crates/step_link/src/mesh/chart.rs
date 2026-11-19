@@ -6,8 +6,8 @@ use std::f64::consts::TAU;
 
 pub(super) enum Chart {
     Plane(Frame),
-    Cylinder(Frame),
-    Cone(Frame, f64),
+    Cylinder(Frame, f64),
+    Cone(Frame, f64, f64),
     /// Frame and radius.
     Sphere(Frame, f64),
     /// Frame, major radius, and minor radius.
@@ -38,10 +38,10 @@ impl Chart {
     pub(super) fn from_surface(surface: &Surface) -> Option<Self> {
         match surface {
             Surface::Plane { frame } => Some(Self::Plane(*frame)),
-            Surface::Cylinder { frame, .. } => Some(Self::Cylinder(*frame)),
+            Surface::Cylinder { frame, radius } => Some(Self::Cylinder(*frame, *radius)),
             Surface::Cone {
-                frame, semi_angle, ..
-            } => Some(Self::Cone(*frame, *semi_angle)),
+                frame, radius, semi_angle
+            } => Some(Self::Cone(*frame, *radius, *semi_angle)),
             Surface::Sphere { frame, radius } => Some(Self::Sphere(*frame, *radius)),
             Surface::Torus {
                 frame,
@@ -56,7 +56,7 @@ impl Chart {
     pub(super) fn periodic(&self) -> [bool; 2] {
         match self {
             Self::Plane(_) | Self::BSpline(_) => [false, false],
-            Self::Cylinder(_) | Self::Cone(..) | Self::Sphere(..) => [true, false],
+            Self::Cylinder(..) | Self::Cone(..) | Self::Sphere(..) => [true, false],
             Self::Torus(..) => [true, true],
         }
     }
@@ -68,7 +68,7 @@ impl Chart {
                 let d = sub(p, f.origin);
                 [dot(d, f.x), dot(d, f.y())]
             }
-            Self::Cylinder(f) | Self::Cone(f, _) => {
+            Self::Cylinder(f, _) | Self::Cone(f, _, _) => {
                 let d = sub(p, f.origin);
                 [dot(d, f.y()).atan2(dot(d, f.x)), dot(d, f.z)]
             }
@@ -91,8 +91,8 @@ impl Chart {
     pub(super) fn normal(&self, p: Point3) -> Point3 {
         match self {
             Self::Plane(f) => f.z,
-            Self::Cylinder(f) => radial_direction(f, p),
-            Self::Cone(f, angle) => {
+            Self::Cylinder(f, _) => radial_direction(f, p),
+            Self::Cone(f, _, angle) => {
                 let radial = radial_direction(f, p);
                 let (s, c) = angle.sin_cos();
                 std::array::from_fn(|k| c * radial[k] - s * f.z[k])
@@ -116,14 +116,15 @@ impl Chart {
     }
 
     /// 3D point for unscaled `(u, v)` coordinates.
-    ///
-    /// Cylinders and cones never have interior points (see [`Self::param_steps`]):
-    /// they collapse to the frame origin.
     pub(super) fn point(&self, uv: [f64; 2]) -> Point3 {
         let [u, v] = uv;
         match self {
             Self::Plane(f) => from_local(f, [u, v, 0.0]),
-            Self::Cylinder(f) | Self::Cone(f, _) => f.origin,
+            Self::Cylinder(f, r) => from_local(f, [r * u.cos(), r * u.sin(), v]),
+            Self::Cone(f, r, angle) => {
+                let r = r + v * angle.tan();
+                from_local(f, [r * u.cos(), r * u.sin(), v])
+            }
             Self::Sphere(f, r) => from_local(
                 f,
                 [r * v.cos() * u.cos(), r * v.cos() * u.sin(), r * v.sin()],
@@ -137,15 +138,29 @@ impl Chart {
     }
 
     /// Interior-point spacing in parameter units (radians or B-spline parameter units).
-    /// `None`: for planar or ruled surfaces, the contours are sufficient.
-    pub(super) fn param_steps(&self, tolerance: f64) -> Option<[f64; 2]> {
+    /// `None`: for planar surfaces, the contours are sufficient.
+    pub(super) fn param_steps(&self, tolerance: f64, loops: &[Vec<Point3>]) -> Option<[f64; 2]> {
         // Angular step that keeps the sagitta on a circle of radius `radius` below `tolerance`.
         let angle = |radius: f64| {
             let ratio = (tolerance / radius.max(1e-9)).min(1.0);
             (2.0 * (1.0 - ratio).acos()).clamp(0.02, 1.0)
         };
         match self {
-            Self::Plane(_) | Self::Cylinder(_) | Self::Cone(..) => None,
+            Self::Plane(_) => None,
+            Self::Cylinder(frame, radius) | Self::Cone(frame, radius, _) => {
+                let (min_v, max_v, max_radius) = loops.iter().flatten().fold(
+                    (f64::INFINITY, f64::NEG_INFINITY, *radius),
+                    |(lo, hi, r), &p| {
+                        let (point_radius, height) = radial_and_height(frame, p);
+                        (lo.min(height), hi.max(height), r.max(point_radius))
+                    },
+                );
+                let height = max_v - min_v;
+                if !height.is_finite() || height <= 0.0 {
+                    return None;
+                }
+                Some([angle(max_radius), height / 2.0])
+            }
             Self::Sphere(_, radius) => {
                 let a = angle(*radius);
                 Some([a, a])
@@ -159,7 +174,7 @@ impl Chart {
     pub(super) fn scale(&self, loops: &[Vec<Point3>]) -> [f64; 2] {
         match self {
             Self::Plane(_) => [1.0, 1.0],
-            Self::Cylinder(f) | Self::Cone(f, _) => [mean_radius(f, loops), 1.0],
+            Self::Cylinder(f, _) | Self::Cone(f, _, _) => [mean_radius(f, loops), 1.0],
             Self::Sphere(f, radius) => {
                 // The length of one degree of longitude is `R·cos(latitude)`.
                 let (sum, count) = loops.iter().flatten().fold((0.0, 0usize), |(s, n), &p| {
@@ -244,10 +259,24 @@ mod tests {
     }
 
     #[test]
-    fn ruled_surfaces_have_no_interior_points() {
+    fn ruled_surfaces_evaluate_interior_points() {
         let frame = Frame::from_normal([0.0; 3], [0.0, 0.0, 1.0]);
-        assert!(Chart::Plane(frame).param_steps(0.05).is_none());
-        assert!(Chart::Cylinder(frame).param_steps(0.05).is_none());
-        assert!(Chart::Sphere(frame, 5.0).param_steps(0.05).is_some());
+        let cylinder = Chart::Cylinder(frame, 5.0);
+        let cone = Chart::Cone(frame, 5.0, 0.2);
+        for chart in [&cylinder, &cone] {
+            let uv = [0.7, 2.0];
+            let point = chart.point(uv);
+            let actual = chart.uv(point);
+            assert!((actual[0] - uv[0]).abs() < 1e-9);
+            assert!((actual[1] - uv[1]).abs() < 1e-9);
+            let expected_radius = match chart {
+                Chart::Cylinder(_, radius) => *radius,
+                Chart::Cone(_, radius, angle) => radius + uv[1] * angle.tan(),
+                _ => unreachable!(),
+            };
+            assert!((radial_and_height(&frame, point).0 - expected_radius).abs() < 1e-9);
+            let loops = vec![vec![chart.point([0.0, 0.0]), point]];
+            assert!(chart.param_steps(0.05, &loops).is_some());
+        }
     }
 }

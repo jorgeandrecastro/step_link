@@ -3,7 +3,7 @@
 //! Edges are discretized once and shared between adjacent faces.
 //! Each face is then projected into its surface's parameter space and triangulated using
 //! constrained Delaunay (`spade`): contours are constrained edges, and curved surfaces
-//! (spheres, tori, B-splines) receive interior points with a density based on the tolerance.
+//! (cylinders, cones, spheres, tori, B-splines) receive interior points.
 //! For pathological contours, the algorithm falls back to *ear clipping*.
 //! Planes, cylinders, cones, spheres, tori, and B-spline surfaces are supported.
 //!
@@ -18,14 +18,17 @@ mod edges;
 mod spline;
 mod triangulate;
 
-use crate::brep::{Face, Point3, Solid, Surface, cross, dot, sub};
+use crate::brep::{Curve, Face, Point3, Solid, Surface, cross, dot, sub};
 use chart::{Chart, unwrap_axis};
 use edges::{EdgeCache, loop_polyline};
 use std::f64::consts::TAU;
 use triangulate::{Triangulation, area, triangulate_refined};
 
-/// Default maximum sagitta, in model units (millimeters for most CAD exports).
+/// Fallback tolerance in model units for a solid with a degenerate bounding box.
 pub const DEFAULT_TOLERANCE: f64 = 0.05;
+
+/// Default physical tolerance, in meters (0.01 mm).
+pub const DEFAULT_TOLERANCE_METERS: f64 = 1e-5;
 
 /// Color for faces without an assigned color in a mesh where other faces are colored.
 pub const DEFAULT_COLOR: [f32; 3] = [0.8, 0.8, 0.8];
@@ -53,9 +56,60 @@ impl MeshData {
     }
 }
 
-/// Tessellates an entire solid using the default tolerance.
+/// Tessellates a solid with a tolerance relative to its bounding-box diagonal.
 pub fn tessellate(solid: &Solid) -> MeshData {
-    tessellate_with_tolerance(solid, DEFAULT_TOLERANCE)
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    let mut include = |point: Point3| {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(point[axis]);
+            max[axis] = max[axis].max(point[axis]);
+        }
+    };
+    for vertex in &solid.vertices {
+        include(vertex.position);
+    }
+    for edge in &solid.edges {
+        match &edge.curve {
+            Curve::Circle { frame, radius } => {
+                let y = frame.y();
+                let extent: Point3 = std::array::from_fn(|i| radius * frame.x[i].hypot(y[i]));
+                include(std::array::from_fn(|i| frame.origin[i] - extent[i]));
+                include(std::array::from_fn(|i| frame.origin[i] + extent[i]));
+            }
+            Curve::Ellipse { frame, semi_major, semi_minor } => {
+                let y = frame.y();
+                let extent: Point3 = std::array::from_fn(|i| {
+                    (semi_major * frame.x[i]).hypot(semi_minor * y[i])
+                });
+                include(std::array::from_fn(|i| frame.origin[i] - extent[i]));
+                include(std::array::from_fn(|i| frame.origin[i] + extent[i]));
+            }
+            Curve::BSpline(spline) => {
+                for &point in &spline.control_points {
+                    include(point);
+                }
+            }
+            Curve::Line => {}
+        }
+    }
+    let diagonal = dist(min, max);
+    let tolerance = if diagonal.is_finite() && diagonal > 0.0 {
+        diagonal * 5e-4
+    } else {
+        DEFAULT_TOLERANCE
+    };
+    tessellate_with_tolerance(solid, tolerance)
+}
+
+/// Tessellates with a 0.01 mm tolerance, given meters per model unit.
+///
+/// # Panics
+///
+/// Panics if `unit_scale` is not finite and strictly positive.
+pub fn tessellate_with_unit_scale(solid: &Solid, unit_scale: f64) -> MeshData {
+    assert!(unit_scale.is_finite() && unit_scale > 0.0, "unit_scale must be finite and positive");
+    tessellate_with_tolerance(solid, DEFAULT_TOLERANCE_METERS / unit_scale)
 }
 
 /// Tessellates a solid; `tolerance` is the maximum permitted curve sagitta.
@@ -123,8 +177,21 @@ fn merge_wound_loops(loops2d: &mut Vec<Vec<[f64; 2]>>, loops3d: &mut Vec<Vec<Poi
         b3.reverse();
     }
 
-    // Shift B by whole turns so that its start is close to the end of A's turn.
     let ua = a2[0][0];
+    let b_start = (0..b2.len())
+        .min_by(|&i, &j| {
+            let distance = |u: f64| {
+                let delta = u - ua;
+                (delta - TAU * (delta / TAU).round()).abs()
+            };
+            distance(b2[i][0]).total_cmp(&distance(b2[j][0]))
+        })
+        .unwrap_or(0);
+    b2.rotate_left(b_start);
+    b3.rotate_left(b_start);
+    unwrap_axis(&mut b2, 0);
+
+    // Shift B by whole turns so that its start is close to the end of A's turn.
     let shift = TAU * ((ua + TAU - b2[0][0]) / TAU).round();
     for p in b2.iter_mut() {
         p[0] += shift;
@@ -235,13 +302,17 @@ fn tessellate_face(
 
     // Interior-point spacing, converted to scaled 2D space.
     let step = chart
-        .param_steps(tolerance)
+        .param_steps(tolerance, &loops3d)
         .map(|s| [s[0] * scale[0], s[1] * scale[1]]);
     let Triangulation {
         points,
         source,
         triangles,
     } = triangulate_refined(&loops2d[0], &loops2d[1..], step);
+    if triangles.is_empty() {
+        eprintln!("face {face_index} ignorée : triangulation vide");
+        return;
+    }
 
     let sign = if face.same_sense { 1.0 } else { -1.0 };
     let color = face.color.or(solid.color).unwrap_or(DEFAULT_COLOR);
@@ -275,10 +346,13 @@ fn tessellate_face(
         let (pa, pb, pc) = (point(a), point(b), point(c));
         let normal = mesh.normals[a as usize].map(f64::from);
         if dot(cross(sub(pb, pa), sub(pc, pa)), normal) < 0.0 {
-            let kind = if matches!(&face.surface, Surface::BSpline(_)) {
-                "B-spline"
-            } else {
-                "autre surface"
+            let kind = match &face.surface {
+                Surface::Plane { .. } => "plan",
+                Surface::Cylinder { .. } => "cylindre",
+                Surface::Cone { .. } => "cône",
+                Surface::Sphere { .. } => "sphère",
+                Surface::Torus { .. } => "tore",
+                Surface::BSpline(_) => "B-spline",
             };
             eprintln!("face {face_index} ({kind}) : winding incohérent avec la normale");
         }
@@ -288,6 +362,96 @@ fn tessellate_face(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brep::{Edge, Frame, Loop, OrientedEdge, Shell, Vertex};
+
+    fn cylindrical_face(radius: f64, height: f64) -> Solid {
+        let frame = Frame::new([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let mut top = frame;
+        top.origin[2] = height;
+        let edges = [frame, top]
+            .into_iter()
+            .enumerate()
+            .map(|(i, frame)| Edge {
+                start: i,
+                end: i,
+                curve: Curve::Circle { frame, radius },
+                same_sense: true,
+            })
+            .collect();
+        let ring = |edge, forward| Loop {
+            edges: vec![OrientedEdge { edge, forward }],
+        };
+        Solid {
+            vertices: vec![
+                Vertex::new(radius, 0.0, 0.0),
+                Vertex::new(radius, 0.0, height),
+            ],
+            edges,
+            shells: vec![Shell {
+                faces: vec![Face {
+                    surface: Surface::Cylinder { frame, radius },
+                    outer_loop: ring(0, true),
+                    inner_loops: vec![ring(1, false)],
+                    same_sense: true,
+                    color: None,
+                }],
+            }],
+            color: None,
+        }
+    }
+
+    #[test]
+    fn cylinder_has_interior_points_on_surface() {
+        let mesh = tessellate_with_unit_scale(&cylindrical_face(5.0, 10.0), 0.001);
+        assert!(mesh.positions.iter().any(|p| p[2] > 0.0 && p[2] < 10.0));
+        for p in &mesh.positions {
+            assert!((p[0].hypot(p[1]) - 5.0).abs() < 1e-5);
+        }
+        for triangle in mesh.indices.chunks_exact(3) {
+            for i in 0..3 {
+                let a = mesh.positions[triangle[i] as usize];
+                let b = mesh.positions[triangle[(i + 1) % 3] as usize];
+                assert!(a[0] * b[0] + a[1] * b[1] > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn cone_has_interior_points_on_surface() {
+        let mut solid = cylindrical_face(5.0, 10.0);
+        let angle: f64 = 0.2;
+        let top_radius = 5.0 + 10.0 * angle.tan();
+        solid.vertices[1].position[0] = top_radius;
+        if let Curve::Circle { radius, .. } = &mut solid.edges[1].curve {
+            *radius = top_radius;
+        }
+        let frame = Frame::new([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        solid.shells[0].faces[0].surface = Surface::Cone {
+            frame,
+            radius: 5.0,
+            semi_angle: angle,
+        };
+        let mesh = tessellate_with_unit_scale(&solid, 0.001);
+        assert!(mesh.positions.iter().any(|p| p[2] > 0.0 && p[2] < 10.0));
+        for p in &mesh.positions {
+            let expected = 5.0 + f64::from(p[2]) * angle.tan();
+            assert!((f64::from(p[0].hypot(p[1])) - expected).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn cylinder_segments_match_between_centimeters_and_millimeters() {
+        let mm = cylindrical_face(5.0, 10.0);
+        let cm = cylindrical_face(0.5, 1.0);
+        let boundary_count = |mesh: &MeshData| {
+            mesh.positions.iter().filter(|p| p[2].abs() < 1e-6).count()
+        };
+        let mm_mesh = tessellate_with_unit_scale(&mm, 0.001);
+        let cm_mesh = tessellate_with_unit_scale(&cm, 0.01);
+        assert!(boundary_count(&mm_mesh) > 30);
+        assert_eq!(boundary_count(&mm_mesh), boundary_count(&cm_mesh));
+        assert_eq!(boundary_count(&tessellate(&mm)), boundary_count(&tessellate(&cm)));
+    }
 
     #[test]
     fn cuboid_has_twelve_triangles() {
@@ -324,11 +488,17 @@ mod tests {
                 .map(|i| [dir * TAU * i as f64 / n as f64, v])
                 .collect()
         };
-        let mut l2 = vec![ring(0.0, 1.0), ring(1.0, -1.0)];
+        let mut second = ring(1.0, -1.0);
+        for point in &mut second {
+            point[0] += std::f64::consts::PI;
+        }
+        let mut l2 = vec![ring(0.0, 1.0), second];
         let mut l3 = vec![vec![[0.0; 3]; n], vec![[0.0; 3]; n]];
         merge_wound_loops(&mut l2, &mut l3);
         assert_eq!(l2.len(), 1);
         assert_eq!(l2[0].len(), 2 * n + 2);
         assert_eq!(l2[0].len(), l3[0].len());
+        assert!((l2[0][n][0] - l2[0][n + 1][0]).abs() < 1e-9);
+        assert!((l2[0][0][0] - l2[0][2 * n + 1][0]).abs() < 1e-9);
     }
 }
