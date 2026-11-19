@@ -11,7 +11,7 @@ use bevy_step_link::StepLinkPlugin;
 // CONFIGURATION
 // ============================================================
 
-const MODEL_PATH: &str = "models/UMI-HH-06_Gripper-Mount.step";
+const MODEL_PATH: &str = "models/UMI-EE-08_Camera-D435i-Body.step";
 
 // Taille cible de la plus grande dimension de l'objet (unités Bevy).
 const TARGET_SIZE: f32 = 2.0;
