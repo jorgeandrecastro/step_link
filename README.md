@@ -211,10 +211,11 @@ println!("{} entities", file.entities.len());
 Inspecting a file (entity count, solid statistics):
 
 ```sh
-cargo run -p bevy_step_link --example inspect -- part.step
+cargo run -p step_link --example inspect -- crates/bevy_step_link/assets/models/part.step
+cargo run -p step_link --example inspect -- crates/bevy_step_link/assets/models/UMI-HH-01_Handle.step
 ```
 
-This command accepts a `.step` or `.stp` path. It outputs STEP entities, reconstructed solids, skipped faces, and triangle counts; read, parse, or reconstruction errors are printed to the terminal.
+Run these commands from the repository root. The second command requires `UMI-HH-01_Handle.step` to be present in the models directory. The command accepts a `.step` or `.stp` path, relative to the current directory or absolute. It outputs STEP entities, reconstructed solids, skipped faces, and triangle counts; read, parse, or reconstruction errors are printed to the terminal.
 
 To visually inspect a new part in Bevy, place it at `crates/bevy_step_link/assets/models/part.step` (or update the `models/part.step` path in `crates/bevy_step_link/examples/load_step.rs`), then run:
 
