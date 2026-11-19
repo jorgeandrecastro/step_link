@@ -223,7 +223,9 @@ To visually inspect a new part in Bevy, place it at `crates/bevy_step_link/asset
 cargo run -p bevy_step_link --example load_step
 ```
 
-The loader converts units to meters and axes to Y-up. `cargo test --workspace` runs the project's automated test suite; this command does not automatically load an arbitrary STEP file.
+The loader converts units to meters and axes to Y-up, and tessellates with a 0.05 mm tolerance converted to file units. The inspector reports the detected unit scale and uses the same tolerance. Unknown and non-SI units currently default to meters. Tessellation diagnostics report skipped contours and triangulation fallbacks on standard error.
+
+`cargo test --workspace` runs the project's automated test suite; this command does not automatically load an arbitrary STEP file.
 
 ## Development
 

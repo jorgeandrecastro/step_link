@@ -147,6 +147,10 @@ pub(super) fn triangulate(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Vec<[u
 
     for (n, hole) in hole_rings.iter().enumerate() {
         let Some((ri, hi)) = find_bridge(&pts, &ring, hole, &hole_rings[n + 1..]) else {
+            eprintln!(
+                "ear clipping : impossible de relier un trou ({} points)",
+                hole.len()
+            );
             continue;
         };
         let mut merged = Vec::with_capacity(ring.len() + hole.len() + 2);
@@ -378,7 +382,14 @@ pub(super) fn triangulate_refined(
         None => Vec::new(),
     };
 
-    build_cdt(&rings, &interior).unwrap_or_else(|| fallback(outer, holes))
+    build_cdt(&rings, &interior).unwrap_or_else(|| {
+        eprintln!(
+            "repli ear clipping : contour extérieur de {} points, {} trous",
+            outer.len(),
+            holes.len()
+        );
+        fallback(outer, holes)
+    })
 }
 
 #[cfg(test)]

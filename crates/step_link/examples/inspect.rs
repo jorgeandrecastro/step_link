@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use step_link::brep::Surface;
-use step_link::mesh::tessellate;
+use step_link::mesh::tessellate_with_tolerance;
 use step_link::parser::{parse_part21, parse_step};
 
 fn main() {
@@ -43,6 +43,8 @@ fn main() {
 
     match parse_step(&text) {
         Ok(model) => {
+            println!("unit_scale = {} m/unité", model.unit_scale);
+            let tolerance = 5e-5 / model.unit_scale;
             if model.skipped_faces > 0 {
                 println!(
                     "{} face(s) ignorée(s) (surface non prise en charge)",
@@ -62,7 +64,7 @@ fn main() {
                     solid.face_count(),
                     planes,
                     holes,
-                    tessellate(solid).triangle_count()
+                    tessellate_with_tolerance(solid, tolerance).triangle_count()
                 );
                 let colored_faces = solid.faces().filter(|f| f.color.is_some()).count();
                 println!(

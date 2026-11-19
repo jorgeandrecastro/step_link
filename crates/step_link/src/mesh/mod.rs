@@ -18,7 +18,7 @@ mod edges;
 mod spline;
 mod triangulate;
 
-use crate::brep::{Face, Point3, Solid, dot, sub};
+use crate::brep::{Face, Point3, Solid, Surface, cross, dot, sub};
 use chart::{Chart, unwrap_axis};
 use edges::{EdgeCache, loop_polyline};
 use std::f64::consts::TAU;
@@ -60,12 +60,14 @@ pub fn tessellate(solid: &Solid) -> MeshData {
 
 /// Tessellates a solid; `tolerance` is the maximum permitted curve sagitta.
 pub fn tessellate_with_tolerance(solid: &Solid, tolerance: f64) -> MeshData {
-    let tolerance = tolerance.max(1e-6);
+    let tolerance = tolerance.max(1e-12);
     let mut mesh = MeshData::default();
     let mut cache = EdgeCache::new();
     let colored = solid.color.is_some() || solid.faces().any(|f| f.color.is_some());
-    for face in solid.faces() {
-        tessellate_face(solid, face, colored, &mut cache, tolerance, &mut mesh);
+    for (face_index, face) in solid.faces().enumerate() {
+        tessellate_face(
+            solid, face, face_index, colored, &mut cache, tolerance, &mut mesh,
+        );
     }
     mesh
 }
@@ -79,24 +81,107 @@ pub(crate) fn scaled(v: Point3, k: f64) -> Point3 {
     [v[0] * k, v[1] * k, v[2] * k]
 }
 
+/// Number of turns a loop makes around the periodic `u` axis (angles already unwrapped).
+fn winding(uv: &[[f64; 2]]) -> i32 {
+    let (first, last) = (uv[0][0], uv[uv.len() - 1][0]);
+    // Closing step from the last point back to the first, wrapped to [-pi, pi].
+    let mut closing = first - last;
+    closing -= TAU * (closing / TAU).round();
+    ((last - first + closing) / TAU).round() as i32
+}
+
+/// A full circle is a straight segment in `(u, v)` (it winds around the axis without closing).
+/// A cylinder, cone or sphere zone bounded by two such circles and with no seam edge
+/// (typical of drilled holes) would therefore be triangulated as garbage.
+///
+/// The two circles are merged into one parallelogram: A left to right, a cut, B right to left,
+/// and the same cut closed on the left. In 3D both cuts are the same line (an artificial seam).
+fn merge_wound_loops(loops2d: &mut Vec<Vec<[f64; 2]>>, loops3d: &mut Vec<Vec<Point3>>) {
+    let wound: Vec<usize> = (0..loops2d.len())
+        .filter(|&i| loops2d[i].len() >= 3 && winding(&loops2d[i]) != 0)
+        .collect();
+    if wound.len() != 2 {
+        return;
+    }
+    let (ia, ib) = (wound[0], wound[1]);
+    if winding(&loops2d[ia]).abs() != 1 || winding(&loops2d[ib]).abs() != 1 {
+        return;
+    }
+
+    let mut a2 = loops2d[ia].clone();
+    let mut a3 = loops3d[ia].clone();
+    let mut b2 = loops2d[ib].clone();
+    let mut b3 = loops3d[ib].clone();
+
+    // A goes towards +u, B towards -u.
+    if winding(&a2) < 0 {
+        a2.reverse();
+        a3.reverse();
+    }
+    if winding(&b2) > 0 {
+        b2.reverse();
+        b3.reverse();
+    }
+
+    // Shift B by whole turns so that its start is close to the end of A's turn.
+    let ua = a2[0][0];
+    let shift = TAU * ((ua + TAU - b2[0][0]) / TAU).round();
+    for p in b2.iter_mut() {
+        p[0] += shift;
+    }
+
+    let mut poly2 = a2.clone();
+    let mut poly3 = a3.clone();
+    poly2.push([ua + TAU, a2[0][1]]);
+    poly3.push(a3[0]);
+
+    let b0 = b2[0];
+    poly2.extend(b2.iter().copied());
+    poly3.extend(b3.iter().copied());
+    poly2.push([b0[0] - TAU, b0[1]]);
+    poly3.push(b3[0]);
+
+    // `wound` is ascending: remove the larger index first.
+    for i in [ib, ia] {
+        loops2d.remove(i);
+        loops3d.remove(i);
+    }
+    loops2d.push(poly2);
+    loops3d.push(poly3);
+}
+
 fn tessellate_face(
     solid: &Solid,
     face: &Face,
+    face_index: usize,
     colored: bool,
     cache: &mut EdgeCache,
     tolerance: f64,
     mesh: &mut MeshData,
 ) {
     let Some(chart) = Chart::from_surface(&face.surface) else {
+        eprintln!("face {face_index} ignorée : projection de surface impossible");
         return;
     };
-    let mut loops3d: Vec<Vec<Point3>> = std::iter::once(&face.outer_loop)
-        .chain(face.inner_loops.iter())
-        .map(|l| loop_polyline(solid, cache, l, tolerance))
-        .filter(|points| points.len() >= 3)
-        .collect();
-    if loops3d.is_empty() {
+    let outer = loop_polyline(solid, cache, &face.outer_loop, tolerance);
+    if outer.len() < 3 {
+        eprintln!(
+            "face {face_index} ignorée : contour extérieur dégénéré ({} points)",
+            outer.len()
+        );
         return;
+    }
+    let mut loops3d = vec![outer];
+    for (loop_index, face_loop) in face.inner_loops.iter().enumerate() {
+        let points = loop_polyline(solid, cache, face_loop, tolerance);
+        if points.len() < 3 {
+            eprintln!(
+                "face {face_index} : contour interne {loop_index} ignoré ({} points)",
+                points.len()
+            );
+        } else {
+            loops3d.push(points);
+        }
     }
 
     let periodic = chart.periodic();
@@ -112,6 +197,14 @@ fn tessellate_face(
             uv
         })
         .collect();
+
+    // Scale computed from the real contours, before any loop is merged.
+    let scale = chart.scale(&loops3d);
+
+    // Two circles around the axis, without a seam edge: merge them into one band.
+    if periodic[0] {
+        merge_wound_loops(&mut loops2d, &mut loops3d);
+    }
 
     // The largest contour is the outer contour.
     let outer_index = (0..loops2d.len())
@@ -135,7 +228,6 @@ fn tessellate_face(
         }
     }
 
-    let scale = chart.scale(&loops3d);
     for p in loops2d.iter_mut().flatten() {
         p[0] *= scale[0];
         p[1] *= scale[1];
@@ -172,10 +264,24 @@ fn tessellate_face(
             mesh.colors.push(color);
         }
     }
+    let first_index = mesh.indices.len();
     for [a, b, c] in triangles {
         let (b, c) = if face.same_sense { (b, c) } else { (c, b) };
         mesh.indices
             .extend_from_slice(&[base + a as u32, base + b as u32, base + c as u32]);
+    }
+    if let Some(&[a, b, c]) = mesh.indices.get(first_index..first_index + 3) {
+        let point = |index: u32| mesh.positions[index as usize].map(f64::from);
+        let (pa, pb, pc) = (point(a), point(b), point(c));
+        let normal = mesh.normals[a as usize].map(f64::from);
+        if dot(cross(sub(pb, pa), sub(pc, pa)), normal) < 0.0 {
+            let kind = if matches!(&face.surface, Surface::BSpline(_)) {
+                "B-spline"
+            } else {
+                "autre surface"
+            };
+            eprintln!("face {face_index} ({kind}) : winding incohérent avec la normale");
+        }
     }
 }
 
@@ -208,5 +314,21 @@ mod tests {
         assert_eq!(mesh.colors.len(), mesh.positions.len());
         assert_eq!(mesh.colors.iter().filter(|c| **c == [0.0, 1.0, 0.0]).count(), 4);
         assert_eq!(mesh.colors.iter().filter(|c| **c == [1.0, 0.0, 0.0]).count(), 20);
+    }
+
+    #[test]
+    fn two_wound_loops_merge_into_one_band() {
+        let n = 8;
+        let ring = |v: f64, dir: f64| -> Vec<[f64; 2]> {
+            (0..n)
+                .map(|i| [dir * TAU * i as f64 / n as f64, v])
+                .collect()
+        };
+        let mut l2 = vec![ring(0.0, 1.0), ring(1.0, -1.0)];
+        let mut l3 = vec![vec![[0.0; 3]; n], vec![[0.0; 3]; n]];
+        merge_wound_loops(&mut l2, &mut l3);
+        assert_eq!(l2.len(), 1);
+        assert_eq!(l2[0].len(), 2 * n + 2);
+        assert_eq!(l2[0].len(), l3[0].len());
     }
 }

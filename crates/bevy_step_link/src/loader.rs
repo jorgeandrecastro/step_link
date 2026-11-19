@@ -7,7 +7,7 @@ use bevy::asset::{AssetLoader, LoadContext, RenderAssetUsages, io::Reader};
 use bevy::reflect::TypePath;
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use std::fmt;
-use step_link::mesh::{DEFAULT_COLOR, MeshData, tessellate};
+use step_link::mesh::{DEFAULT_COLOR, MeshData, tessellate_with_tolerance};
 use step_link::parser::{ParseError, parse_step};
 
 /// Errors that can occur while loading a STEP file.
@@ -86,7 +86,12 @@ impl AssetLoader for StepLoader {
 
         // Convert file units to meters, then convert STEP Z-up to Bevy Y-up.
         let scale = model.unit_scale as f32;
-        let parts: Vec<MeshData> = model.solids.iter().map(tessellate).collect();
+        let tolerance = 5e-5 / model.unit_scale;
+        let parts: Vec<MeshData> = model
+            .solids
+            .iter()
+            .map(|solid| tessellate_with_tolerance(solid, tolerance))
+            .collect();
         let colored = parts.iter().any(|p| !p.colors.is_empty());
         let mut data = MeshData::default();
         for part in &parts {

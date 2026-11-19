@@ -1,7 +1,9 @@
 use bevy::input::mouse::{
     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit,
 };
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
+use bevy::render::{RenderPlugin, render_resource::WgpuFeatures, settings::WgpuSettings};
 
 use bevy_step_link::StepLinkPlugin;
 
@@ -9,7 +11,7 @@ use bevy_step_link::StepLinkPlugin;
 // CONFIGURATION
 // ============================================================
 
-const MODEL_PATH: &str = "models/UMI-HH-01_Handle.step";
+const MODEL_PATH: &str = "models/UMI-HH-06_Gripper-Mount.step";
 
 // Taille cible de la plus grande dimension de l'objet (unités Bevy).
 const TARGET_SIZE: f32 = 2.0;
@@ -33,7 +35,18 @@ const ZOOM_SENSITIVITY: f32 = 0.1;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, StepLinkPlugin))
+        .add_plugins((
+            DefaultPlugins.set(RenderPlugin {
+                render_creation: WgpuSettings {
+                    features: WgpuFeatures::POLYGON_MODE_LINE,
+                    ..default()
+                }
+                .into(),
+                ..default()
+            }),
+            WireframePlugin::default(),
+            StepLinkPlugin,
+        ))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -72,6 +85,12 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    commands.insert_resource(WireframeConfig {
+        global: true,
+        default_color: Color::WHITE,
+        ..default()
+    });
+
     let mesh: Handle<Mesh> = asset_server.load(MODEL_PATH);
 
     let material = materials.add(StandardMaterial {
